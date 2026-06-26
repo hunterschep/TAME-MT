@@ -29,26 +29,7 @@ jobs:
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
           CIBW_SKIP: "*-musllinux_*"
-          CIBW_TEST_COMMAND: >-
-            tame-mt doctor &&
-            tame-mt score
-            --train-src {project}/tests/fixtures/train.src
-            --train-tgt {project}/tests/fixtures/train.tgt
-            --test-src {project}/tests/fixtures/test.src
-            --ref {project}/tests/fixtures/test.ref
-            --hyp {project}/tests/fixtures/hyp.out
-            --quiet &&
-            tame-mt index build
-            --train-src {project}/tests/fixtures/train.src
-            --train-tgt {project}/tests/fixtures/train.tgt
-            --out tame_fixture.tameidx
-            --quiet &&
-            tame-mt score
-            --index tame_fixture.tameidx
-            --test-src {project}/tests/fixtures/test.src
-            --ref {project}/tests/fixtures/test.ref
-            --hyp {project}/tests/fixtures/hyp.out
-            --quiet
+          CIBW_TEST_COMMAND: "python {project}/scripts/wheel_smoke.py"
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}

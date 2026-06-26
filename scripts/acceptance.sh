@@ -23,6 +23,14 @@ rm -rf build dist src/tame_mt.egg-info
 python -m build
 python -m twine check dist/*
 
+wheel_smoke_venv=$(mktemp -d)
+trap 'rm -rf "$wheel_smoke_venv"' EXIT
+python -m venv "$wheel_smoke_venv"
+"$wheel_smoke_venv/bin/python" -m pip install dist/*.whl
+"$wheel_smoke_venv/bin/python" scripts/wheel_smoke.py
+rm -rf "$wheel_smoke_venv"
+trap - EXIT
+
 tame-mt doctor
 tame-mt score \
   --train-src tests/fixtures/train.src \

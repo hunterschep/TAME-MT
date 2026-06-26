@@ -34,6 +34,9 @@
 - Extended the synthetic benchmark with staged index-build, indexed-audit, and
   cached-scoring timings.
 - Made staged benchmark indexed timings include persisted `.tameidx` load time.
+- Replaced inline wheel smoke tests with a cross-platform script covering gzip
+  IO, index reuse, cached scoring, and TM metadata outputs.
+- Added clean-venv built-wheel smoke testing to the acceptance script.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

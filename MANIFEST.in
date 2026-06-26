@@ -9,6 +9,6 @@ recursive-include benchmarks *.md *.py
 recursive-include docs *.md
 recursive-include .github *.yml
 recursive-include examples *
-recursive-include scripts *.sh
+recursive-include scripts *.sh *.py
 recursive-include tests *.py
 recursive-include tests/fixtures *
