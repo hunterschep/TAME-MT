@@ -125,6 +125,9 @@ report = scorer.score_from_artifacts(
 This path does not inspect the training corpus or rebuild nearest-neighbor
 indexes.
 
+Artifact indices are validated and canonicalized before scoring. They must be
+unique and contiguous from `0` to `N-1`; valid rows may be supplied out of order.
+
 ## Custom Configuration
 
 ```python

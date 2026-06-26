@@ -119,3 +119,7 @@ Raw text fields are opt-in:
 --include-hyp-text
 --include-neighbor-text
 ```
+
+Consumers should treat `index` as the authoritative original segment position.
+`score-cached` requires indices to be unique and contiguous from `0` to `N-1`
+and sorts valid rows by index before scoring.

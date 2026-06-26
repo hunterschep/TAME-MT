@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from tame_mt.artifacts import validate_segment_artifacts
 from tame_mt.bins import compute_generalization_gap, score_bins
 from tame_mt.config import ScoreConfig
 from tame_mt.exceptions import ConfigurationError, InputDataError
@@ -88,8 +89,8 @@ class TameScorer:
     ) -> TameReport:
         if not exposures:
             raise InputDataError("segment artifact must contain at least one segment")
+        exposures, tm_results = validate_segment_artifacts(exposures, tm_results)
         tm_hyp = [result.tm_hyp for result in tm_results]
-        validate_equal_lengths("segments", exposures, "tm_results", tm_results)
         for ref_idx, ref in enumerate(refs):
             validate_equal_lengths("segments", exposures, f"ref[{ref_idx}]", ref)
         validate_equal_lengths("segments", exposures, "hyp", hyp)

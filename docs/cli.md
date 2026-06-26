@@ -107,6 +107,10 @@ tame-mt score-cached \
 segment JSONL file. It recomputes only system metrics, TM metrics, delta over
 TM, bin scores, warnings, and the final report.
 
+Segment rows are validated before scoring. Indices must be unique and
+contiguous from `0` to `N-1`; valid rows may appear in any order and are sorted
+by index before metrics are computed.
+
 ## Shared Options
 
 ```bash

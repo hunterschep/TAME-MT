@@ -39,7 +39,8 @@ def score_bins(
     num_test = len(exposures)
     reports: list[BinReport] = []
     for name in BIN_ORDER:
-        indices = [segment.index for segment in exposures if segment.bin == name]
+        segments = [segment for segment in exposures if segment.bin == name]
+        indices = [segment.index for segment in segments]
         subset_refs = _subset_refs(refs, indices) if refs is not None else None
         system_scores = _score_subset(hyp, subset_refs, indices, config)
         tm_scores = _score_subset(tm_hyp, subset_refs, indices, config)
@@ -49,7 +50,7 @@ def score_bins(
                 count=len(indices),
                 percentage=(len(indices) / num_test) if num_test else 0.0,
                 mean_source_exposure=(
-                    mean(exposures[idx].source_exposure for idx in indices) if indices else None
+                    mean(segment.source_exposure for segment in segments) if segments else None
                 ),
                 system_scores=system_scores,
                 tm_scores=tm_scores,
