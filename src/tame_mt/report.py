@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from tame_mt.config import ScoreConfig
+from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
+from tame_mt.version import __version__
+
+
+def build_signature(config: ScoreConfig) -> str:
+    norm = _normalization_signature(config)
+    orders = _orders_signature(config.similarity.ngram_orders)
+    leaks = ",".join(f"{threshold:.2f}" for threshold in config.bins.leak_thresholds)
+    metrics = ",".join(metric.lower() for metric in config.metrics)
+    return (
+        f"tame-mt|v:{__version__}|norm:{norm}|sim:char_jaccard_{orders}_set|"
+        f"idx:inv_exact|tm:src_nn_top1_zero_{config.tm.zero_policy}|"
+        f"bins:far{config.bins.far_threshold:.2f}_near{config.bins.near_threshold:.2f}_leak{leaks}|"
+        f"pair_k:{config.index.topk}|metrics:{metrics}|"
+        f"sacrebleu:bleu_tok_{config.metric.bleu_tokenize}_lc_{int(config.metric.bleu_lowercase)}_"
+        f"chrf_wo_{config.metric.chrf_word_order}"
+    )
+
+
+def config_to_dict(config: ScoreConfig) -> dict[str, Any]:
+    return {
+        "normalization": asdict(config.normalization),
+        "similarity": {
+            "type": config.similarity.similarity,
+            "ngram_orders": list(config.similarity.ngram_orders),
+        },
+        "index": asdict(config.index),
+        "bins": {
+            "far_threshold": config.bins.far_threshold,
+            "near_threshold": config.bins.near_threshold,
+            "leak_thresholds": list(config.bins.leak_thresholds),
+            "min_bin_size_warning": config.bins.min_bin_size_warning,
+        },
+        "pair": {"pair_k": config.index.topk},
+        "tm": asdict(config.tm),
+        "metrics": list(config.metrics),
+        "sacrebleu": asdict(config.metric),
+    }
+
+
+def render_text_report(report: TameReport) -> str:
+    lines: list[str] = []
+    lines.extend(
+        [
+            "TAME-MT report",
+            "==============",
+            "",
+            "Data",
+            "----",
+            f"Train segments:  {report.num_train:,}",
+            f"Test segments:   {report.num_test:,}",
+            "",
+        ]
+    )
+    lines.extend(_render_quality(report))
+    lines.extend(_render_exposure(report))
+    lines.extend(_render_bins(report))
+    lines.extend(_render_gen_gap(report))
+    if report.warnings:
+        lines.extend(["Warnings", "--------"])
+        lines.extend(f"- {warning}" for warning in report.warnings)
+        lines.append("")
+    lines.extend(["Signature", "---------", report.signature])
+    return "\n".join(lines)
+
+
+def write_json_report(path: str | Path, report: TameReport) -> None:
+    with Path(path).open("w", encoding="utf-8") as handle:
+        json.dump(report.to_dict(), handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def write_segment_jsonl(
+    path: str | Path,
+    exposures: list[SegmentExposure],
+    tm_results: list[SegmentTMResult],
+    train_src: list[str],
+    train_tgt: list[str] | None,
+    test_src: list[str],
+    refs: list[list[str]] | None,
+    hyp: list[str] | None,
+    include_neighbor_text: bool = False,
+    include_source_text: bool = False,
+    include_reference_text: bool = False,
+    include_hyp_text: bool = False,
+) -> None:
+    tm_by_index = {result.index: result for result in tm_results}
+    with Path(path).open("w", encoding="utf-8") as handle:
+        for segment in exposures:
+            tm_result = tm_by_index.get(segment.index)
+            payload: dict[str, Any] = {
+                "index": segment.index,
+                "source_exposure": segment.source_exposure,
+                "source_nn_index": segment.source_nn_index,
+                "source_exact": segment.source_exact,
+                "target_exposure": segment.target_exposure,
+                "target_nn_index": segment.target_nn_index,
+                "target_exact": segment.target_exact,
+                "pair_exposure": segment.pair_exposure,
+                "pair_nn_index": segment.pair_nn_index,
+                "pair_exact": segment.pair_exact,
+                "bin": segment.bin,
+                "tm_source_index": tm_result.tm_source_index if tm_result else None,
+                "tm_source_similarity": tm_result.tm_source_similarity if tm_result else None,
+                "tm_hyp": tm_result.tm_hyp if tm_result else "",
+            }
+            if include_source_text:
+                payload["source_text"] = test_src[segment.index]
+            if include_reference_text and refs:
+                payload["reference_text"] = refs[0][segment.index]
+            if include_hyp_text and hyp:
+                payload["hyp_text"] = hyp[segment.index]
+            if include_neighbor_text and segment.source_nn_index is not None:
+                payload["neighbor_source_text"] = train_src[segment.source_nn_index]
+                if train_tgt is not None:
+                    payload["neighbor_target_text"] = train_tgt[segment.source_nn_index]
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _normalization_signature(config: ScoreConfig) -> str:
+    parts = [config.normalization.unicode_form.lower()]
+    parts.append("ws" if config.normalization.collapse_whitespace else "raw_ws")
+    parts.append("lower" if config.normalization.lowercase else "case")
+    if config.normalization.strip_diacritics:
+        parts.append("stripdia")
+    if config.normalization.normalize_punctuation:
+        parts.append("normpunct")
+    return "_".join(parts)
+
+
+def _orders_signature(orders: tuple[int, ...]) -> str:
+    sorted_orders = tuple(sorted(orders))
+    if sorted_orders and sorted_orders == tuple(range(sorted_orders[0], sorted_orders[-1] + 1)):
+        return f"{sorted_orders[0]}-{sorted_orders[-1]}"
+    return ",".join(str(order) for order in sorted_orders)
+
+
+def _render_quality(report: TameReport) -> list[str]:
+    lines = ["Quality", "-------", "Metric       System      TM baseline      delta over TM"]
+    for metric in report.system_scores:
+        label = _metric_label(metric)
+        lines.append(
+            f"{label:<10} {_fmt_score(report.system_scores.get(metric)):>9}"
+            f" {_fmt_score(report.tm_scores.get(metric)):>16}"
+            f" {_fmt_signed(report.delta_scores.get(metric)):>17}"
+        )
+    lines.append("")
+    return lines
+
+
+def _render_exposure(report: TameReport) -> list[str]:
+    lines = ["Exposure", "--------"]
+    lines.extend(_render_exposure_side("Source exposure", report.exposure.source))
+    if report.exposure.target is not None:
+        lines.extend(_render_exposure_side("Target exposure", report.exposure.target))
+    if report.exposure.pair is not None:
+        lines.extend(_render_pair_exposure(report.exposure.pair))
+    lines.append("")
+    return lines
+
+
+def _render_exposure_side(title: str, stats: dict[str, Any]) -> list[str]:
+    lines = [f"{title}:"]
+    lines.extend(
+        [
+            f"  mean:             {_fmt_fraction(stats.get('mean'))}",
+            f"  median:           {_fmt_fraction(stats.get('median'))}",
+            f"  p95:              {_fmt_fraction(stats.get('p95'))}",
+            f"  exact overlap:    {_fmt_pct(stats.get('exact_overlap'))}",
+        ]
+    )
+    thresholds = stats.get("at_threshold") or {}
+    for threshold, value in thresholds.items():
+        lines.append(f"  >= {threshold}:         {_fmt_pct(value)}")
+    lines.append("")
+    return lines
+
+
+def _render_pair_exposure(stats: dict[str, Any]) -> list[str]:
+    lines = ["Pair exposure:"]
+    lines.append(f"  exact overlap:    {_fmt_pct(stats.get('exact_overlap'))}")
+    thresholds = stats.get("at_threshold") or {}
+    for threshold, value in thresholds.items():
+        lines.append(f"  PairLeak@{threshold}:   {_fmt_pct(value)}")
+    lines.append("")
+    return lines
+
+
+def _render_bins(report: TameReport) -> list[str]:
+    metric_names = list(report.system_scores)
+    lines = [
+        "Distance-stratified quality by source exposure",
+        "----------------------------------------------",
+    ]
+    header = "Bin            N      %       MeanSX"
+    for metric in metric_names:
+        label = _metric_label(metric)
+        header += f" {label:>9} {'TM-' + label:>10} {'dTM-' + label:>11}"
+    lines.append(header)
+    for item in report.bins:
+        row = (
+            f"{item.name:<12} {item.count:>5} {_fmt_pct_short(item.percentage):>7}"
+            f" {_fmt_fraction(item.mean_source_exposure):>8}"
+        )
+        for metric in metric_names:
+            row += (
+                f" {_fmt_score(item.system_scores.get(metric)):>9}"
+                f" {_fmt_score(item.tm_scores.get(metric)):>10}"
+                f" {_fmt_signed(item.delta_scores.get(metric)):>11}"
+            )
+        lines.append(row)
+    lines.append("")
+    return lines
+
+
+def _render_gen_gap(report: TameReport) -> list[str]:
+    lines = ["Generalization gap", "------------------"]
+    for metric, value in report.generalization_gap.items():
+        lines.append(f"GenGap-{_metric_label(metric)}:  {_fmt_score(value)}")
+    lines.append("")
+    return lines
+
+
+def _fmt_score(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.2f}"
+
+
+def _metric_label(metric: str) -> str:
+    return "chrF" if metric.lower() == "chrf" else metric.upper()
+
+
+def _fmt_signed(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:+.2f}"
+
+
+def _fmt_fraction(value: float | None | object) -> str:
+    return "n/a" if not isinstance(value, (float, int)) else f"{value:.3f}"
+
+
+def _fmt_pct(value: float | None | object) -> str:
+    return "n/a" if not isinstance(value, (float, int)) else f"{value * 100:.2f}%"
+
+
+def _fmt_pct_short(value: float | None | object) -> str:
+    return "n/a" if not isinstance(value, (float, int)) else f"{value * 100:.1f}%"
