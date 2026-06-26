@@ -7,8 +7,12 @@ from tame_mt.exceptions import AlignmentError, InputDataError
 
 
 def read_lines(path: str | Path) -> list[str]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        return [line.rstrip("\n\r") for line in handle]
+    input_path = Path(path)
+    try:
+        with input_path.open("r", encoding="utf-8") as handle:
+            return [line.rstrip("\n\r") for line in handle]
+    except UnicodeDecodeError as exc:
+        raise InputDataError(f"{input_path} is not valid UTF-8 text") from exc
 
 
 def write_lines(path: str | Path, lines: list[str]) -> None:
@@ -65,7 +69,7 @@ def validate_corpus_inputs(
         raise InputDataError("train.src must contain at least one segment")
     if not test_src:
         raise InputDataError("test.src must contain at least one segment")
-    if hyp is not None and refs is None:
+    if hyp is not None and not refs:
         raise InputDataError("refs are required when hyp is provided")
     validate_parallel_lengths(
         train_src=train_src,

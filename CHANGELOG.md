@@ -24,6 +24,11 @@
   separately.
 - Moved native pair-exposure reranking into a batched Rust path to reduce
   Python/Rust boundary overhead in large indexed audits.
+- Hardened text-file decoding so invalid UTF-8 in corpus or cached segment
+  artifacts produces user-facing TAME-MT errors instead of raw tracebacks.
+- Tightened API and cached-scoring validation for empty references and
+  non-positive training counts.
+- Removed an unused experimental weighted-BLEU helper from the package surface.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

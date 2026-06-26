@@ -259,6 +259,95 @@ def test_cli_reports_alignment_errors(tmp_path: Path, capsys) -> None:
     assert "misaligned input files" in captured.err
 
 
+def test_cli_reports_invalid_utf8_text_inputs(tmp_path: Path, capsys) -> None:
+    bad_hyp = tmp_path / "bad.out"
+    bad_hyp.write_bytes(b"\xff")
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(bad_hyp),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "not valid UTF-8" in captured.err
+
+
+def test_cli_score_cached_reports_invalid_utf8_segment_jsonl(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bad_segments = tmp_path / "bad.jsonl"
+    bad_segments.write_bytes(b"\xff")
+    rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(bad_segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "not valid UTF-8" in captured.err
+
+
+def test_cli_score_cached_rejects_non_positive_num_train(tmp_path: Path, capsys) -> None:
+    segments = tmp_path / "segments.jsonl"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "0",
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert full_rc == 0
+    assert cached_rc == 2
+    assert "num_train must be positive" in captured.err
+
+
 def test_cli_reports_configuration_errors(capsys) -> None:
     rc = main(
         [

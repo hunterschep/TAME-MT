@@ -13,18 +13,24 @@ SegmentRow = TypeVar("SegmentRow", SegmentExposure, SegmentTMResult)
 def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[SegmentTMResult]]:
     exposures: list[SegmentExposure] = []
     tm_results: list[SegmentTMResult] = []
-    with Path(path).open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise InputDataError(f"segment JSONL line {line_number} is invalid JSON") from exc
-            if not isinstance(payload, dict):
-                raise InputDataError(f"segment JSONL line {line_number} is not an object")
-            exposures.append(_segment_exposure_from_payload(payload, line_number))
-            tm_results.append(_tm_result_from_payload(payload, line_number))
+    input_path = Path(path)
+    try:
+        with input_path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise InputDataError(
+                        f"segment JSONL line {line_number} is invalid JSON"
+                    ) from exc
+                if not isinstance(payload, dict):
+                    raise InputDataError(f"segment JSONL line {line_number} is not an object")
+                exposures.append(_segment_exposure_from_payload(payload, line_number))
+                tm_results.append(_tm_result_from_payload(payload, line_number))
+    except UnicodeDecodeError as exc:
+        raise InputDataError(f"{input_path} is not valid UTF-8 text") from exc
     return validate_segment_artifacts(exposures, tm_results)
 
 

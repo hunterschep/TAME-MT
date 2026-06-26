@@ -89,6 +89,10 @@ class TameScorer:
     ) -> TameReport:
         if not exposures:
             raise InputDataError("segment artifact must contain at least one segment")
+        if not refs:
+            raise InputDataError("refs must contain at least one reference")
+        if num_train <= 0:
+            raise InputDataError("num_train must be positive")
         exposures, tm_results = validate_segment_artifacts(exposures, tm_results)
         tm_hyp = [result.tm_hyp for result in tm_results]
         for ref_idx, ref in enumerate(refs):

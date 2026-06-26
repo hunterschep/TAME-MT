@@ -122,4 +122,5 @@ Raw text fields are opt-in:
 
 Consumers should treat `index` as the authoritative original segment position.
 `score-cached` requires indices to be unique and contiguous from `0` to `N-1`
-and sorts valid rows by index before scoring.
+and sorts valid rows by index before scoring. `--num-train` must be the positive
+training segment count used to create the segment diagnostics.

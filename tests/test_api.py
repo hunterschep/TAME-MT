@@ -74,6 +74,32 @@ def test_score_from_artifacts_rejects_missing_segment_index() -> None:
         )
 
 
+def test_score_from_artifacts_rejects_empty_refs() -> None:
+    with pytest.raises(InputDataError, match="at least one reference"):
+        TameScorer().score_from_artifacts(
+            exposures=[_segment(0, 0.1, "far")],
+            tm_results=[
+                SegmentTMResult(index=0, tm_hyp="bad", tm_source_index=0, tm_source_similarity=0.1)
+            ],
+            refs=[],
+            hyp=["bad"],
+            num_train=1,
+        )
+
+
+def test_score_from_artifacts_rejects_non_positive_num_train() -> None:
+    with pytest.raises(InputDataError, match="num_train must be positive"):
+        TameScorer().score_from_artifacts(
+            exposures=[_segment(0, 0.1, "far")],
+            tm_results=[
+                SegmentTMResult(index=0, tm_hyp="bad", tm_source_index=0, tm_source_similarity=0.1)
+            ],
+            refs=[["bad"]],
+            hyp=["bad"],
+            num_train=0,
+        )
+
+
 def _segment(index: int, exposure: float, bin_name: str) -> SegmentExposure:
     return SegmentExposure(
         index=index,

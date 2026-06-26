@@ -61,11 +61,17 @@ def score_sacre_metric_groups_for_systems(
     """
 
     scorer = _build_sacre_metric(metric, config, refs)
+    if not _supports_segment_stats(scorer):
+        return _score_metric_groups_public(metric, systems, refs, groups, config)
+
     results: dict[str, dict[str, float | None]] = {}
-    for system_name, hyps in systems.items():
-        segment_stats = scorer._extract_corpus_statistics(hyps, None)
-        results[system_name] = _aggregate_groups(scorer, segment_stats, groups)
-    return results
+    try:
+        for system_name, hyps in systems.items():
+            segment_stats = scorer._extract_corpus_statistics(hyps, None)
+            results[system_name] = _aggregate_groups(scorer, segment_stats, groups)
+        return results
+    except (AttributeError, TypeError):
+        return _score_metric_groups_public(metric, systems, refs, groups, config)
 
 
 def _aggregate_groups(
@@ -81,6 +87,56 @@ def _aggregate_groups(
         group_stats = [segment_stats[index] for index in indices]
         results[name] = float(scorer._aggregate_and_compute(group_stats).score)
     return results
+
+
+def _supports_segment_stats(scorer: Any) -> bool:
+    return callable(getattr(scorer, "_extract_corpus_statistics", None)) and callable(
+        getattr(scorer, "_aggregate_and_compute", None)
+    )
+
+
+def _score_metric_groups_public(
+    metric: str,
+    systems: Mapping[str, list[str]],
+    refs: list[list[str]],
+    groups: Mapping[str, list[int]],
+    config: MetricConfig,
+) -> dict[str, dict[str, float | None]]:
+    return {
+        system_name: _score_public_groups(metric, hyps, refs, groups, config)
+        for system_name, hyps in systems.items()
+    }
+
+
+def _score_public_groups(
+    metric: str,
+    hyps: list[str],
+    refs: list[list[str]],
+    groups: Mapping[str, list[int]],
+    config: MetricConfig,
+) -> dict[str, float | None]:
+    results: dict[str, float | None] = {}
+    for name, indices in groups.items():
+        if not indices:
+            results[name] = None
+            continue
+        subset_hyps = [hyps[index] for index in indices]
+        subset_refs = [[ref[index] for index in indices] for ref in refs]
+        results[name] = _score_public_metric(metric, subset_hyps, subset_refs, config)
+    return results
+
+
+def _score_public_metric(
+    metric: str,
+    hyps: list[str],
+    refs: list[list[str]],
+    config: MetricConfig,
+) -> float:
+    if metric == "bleu":
+        return score_bleu(hyps, refs, config)
+    if metric == "chrf":
+        return score_chrf(hyps, refs, config)
+    raise ValueError(f"unsupported metric: {metric}")
 
 
 def _build_sacre_metric(

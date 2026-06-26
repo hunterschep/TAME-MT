@@ -100,3 +100,11 @@ def test_read_segment_jsonl_reports_invalid_required_index(tmp_path: Path) -> No
 
     with pytest.raises(InputDataError, match="line 1: expected int-compatible"):
         read_segment_jsonl(path)
+
+
+def test_read_segment_jsonl_rejects_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    path.write_bytes(b"\xff")
+
+    with pytest.raises(InputDataError, match="not valid UTF-8"):
+        read_segment_jsonl(path)
