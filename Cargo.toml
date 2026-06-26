@@ -1,0 +1,27 @@
+[package]
+name = "tame-mt-native"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Native nearest-neighbor backend for TAME-MT"
+homepage = "https://github.com/hunterschep/TAME-MT"
+repository = "https://github.com/hunterschep/TAME-MT"
+documentation = "https://github.com/hunterschep/TAME-MT#readme"
+exclude = [
+    ".mypy_cache/**",
+    ".pytest_cache/**",
+    ".ruff_cache/**",
+    "demo_runs/**",
+    "dist/**",
+    "target/**",
+    "**/__pycache__/**",
+    "*.so",
+]
+
+[lib]
+name = "tame_mt_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23.5", features = ["extension-module"] }
+rayon = "1.10"

@@ -1,5 +1,14 @@
 include CHANGELOG.md
+include CITATION.cff
+include CONTRIBUTING.md
+include SECURITY.md
+include Cargo.toml
+include Cargo.lock
+include src/lib.rs
+recursive-include benchmarks *.md *.py
 recursive-include docs *.md
+recursive-include .github *.yml
 recursive-include examples *
+recursive-include scripts *.sh
 recursive-include tests *.py
 recursive-include tests/fixtures *

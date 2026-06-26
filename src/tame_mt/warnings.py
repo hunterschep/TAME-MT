@@ -33,7 +33,12 @@ def generate_warnings(
 
     system_bleu = system_scores.get("bleu")
     tm_bleu = tm_scores.get("bleu")
-    if system_bleu is not None and tm_bleu is not None and system_bleu > 0 and tm_bleu >= 0.5 * system_bleu:
+    if (
+        system_bleu is not None
+        and tm_bleu is not None
+        and system_bleu > 0
+        and tm_bleu >= 0.5 * system_bleu
+    ):
         warnings.append(
             f"TM-BLEU is {(tm_bleu / system_bleu) * 100:.1f}% of system BLEU. "
             "A nearest-neighbor translation memory explains a substantial fraction of raw BLEU."
@@ -48,10 +53,12 @@ def generate_warnings(
         if num_test and far.count / num_test < 0.10:
             warnings.append(
                 "Less than 10% of the test set is source-far under the default threshold. "
-                "This test set provides limited evidence of out-of-training-distribution generalization."
+                "This test set provides limited evidence of "
+                "out-of-training-distribution generalization."
             )
 
-    if any(value is None for value in generalization_gap.values()):
+    has_system_scores = any(value is not None for value in system_scores.values())
+    if has_system_scores and any(value is None for value in generalization_gap.values()):
         warnings.append("GenGap cannot be computed because the near or far bin is empty.")
 
     return warnings

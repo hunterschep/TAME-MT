@@ -5,7 +5,6 @@ import unicodedata
 
 from tame_mt.config import NormalizationConfig
 
-
 _PUNCT_TRANSLATION = str.maketrans(
     {
         "\u2018": "'",

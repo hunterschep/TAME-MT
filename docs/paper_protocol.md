@@ -14,6 +14,14 @@ sentence. delta over TM is system BLEU minus TM-BLEU. We also report
 PairLeak@0.85 and BLEU stratified by source exposure.
 ```
 
+Report the TAME-MT signature alongside results so normalization, similarity,
+requested index mode, resolved backend, bin thresholds, TM zero policy, pair
+reranking top-k, and SacreBLEU settings are recoverable.
+
+When using `native_fast`, `python_fast`, or `auto` on a large corpus, describe
+the retrieval mode as approximate nearest-neighbor retrieval with exact Jaccard
+reranking of a bounded rare-gram candidate shortlist.
+
 ## Recommended Table Columns
 
 ```text

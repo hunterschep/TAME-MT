@@ -50,11 +50,26 @@ retrieving the closest training source and outputting its paired target.
 Pair exposure is computed by reranking the union of source and target top-k
 candidate training indices. Exact pair overlap is computed exactly.
 
+The default translation-memory zero policy outputs an empty string when a test
+source shares no character n-grams with any training source. This avoids giving
+the TM baseline accidental credit from an arbitrary training target.
+
+Default index mode is `auto`: native Rust exact retrieval for small corpora and
+native Rust fast rare-gram candidate retrieval for larger corpora when the
+extension is installed. Source installs without the extension fall back to the
+same exact/fast pure-Python modes. The signature records the requested mode,
+resolved backend, and fast-mode bounds.
+
 ## Known Limitations
 
 The default similarity is surface-based and may miss semantic paraphrases.
 Thresholds are interpretable defaults, not universal constants. Pair exposure
 uses an approximation in v0.1. BLEU on small bins can be unstable.
+
+TAME-MT should be read as a report, not as a single scalar "TAME score."
+
+Fast retrieval mode is approximate for nearest-neighbor exposure. Exact overlap
+statistics remain exact.
 
 ## Privacy And Safety
 

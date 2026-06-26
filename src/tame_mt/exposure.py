@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from statistics import mean, median
-from typing import Iterable
-
-import numpy as np
 
 from tame_mt.bins import assign_bin_values
 from tame_mt.config import ScoreConfig
-from tame_mt.index import NeighborResult, NgramInvertedIndex
+from tame_mt.index import IndexBackendInfo, NeighborResult, NgramInvertedIndex
 from tame_mt.normalize import normalize_text
 from tame_mt.schema import ExposureSummary, SegmentExposure
+
+
+@dataclass(frozen=True)
+class ExposureComputation:
+    segments: list[SegmentExposure]
+    backend: IndexBackendInfo
 
 
 def compute_exposure(
@@ -19,13 +24,24 @@ def compute_exposure(
     refs: list[list[str]] | None,
     config: ScoreConfig,
 ) -> list[SegmentExposure]:
+    return compute_exposure_result(train_src, train_tgt, test_src, refs, config).segments
+
+
+def compute_exposure_result(
+    train_src: list[str],
+    train_tgt: list[str] | None,
+    test_src: list[str],
+    refs: list[list[str]] | None,
+    config: ScoreConfig,
+) -> ExposureComputation:
     source_index = NgramInvertedIndex.build(
         train_src,
         norm_config=config.normalization,
         sim_config=config.similarity,
+        index_config=config.index,
     )
     target_index = (
-        NgramInvertedIndex.build(train_tgt, config.normalization, config.similarity)
+        NgramInvertedIndex.build(train_tgt, config.normalization, config.similarity, config.index)
         if train_tgt is not None
         else None
     )
@@ -33,14 +49,24 @@ def compute_exposure(
     exact_target_set = set(target_index.normalized_lines) if target_index else None
     exact_pair_set = _build_exact_pair_set(train_src, train_tgt, config) if train_tgt else None
 
+    retrieval_k = max(1, config.index.topk)
+    source_tops_by_segment = source_index.batch_query_topk(test_src, retrieval_k)
+    target_tops_by_ref = (
+        [target_index.batch_query_topk(ref, retrieval_k) for ref in refs]
+        if target_index is not None and refs is not None
+        else []
+    )
+
     exposures: list[SegmentExposure] = []
     for idx, source_text in enumerate(test_src):
-        src_nn = source_index.query_best(source_text)
+        source_top = source_tops_by_segment[idx]
+        src_nn = source_top[0] if source_top else NeighborResult(index=None, score=0.0, exact=False)
         norm_source = normalize_text(source_text, config.normalization)
         source_exact = norm_source in exact_source_set
 
         ref_texts = [ref[idx] for ref in refs] if refs is not None else []
-        target_nn = _best_target_neighbor(ref_texts, target_index) if target_index else None
+        target_tops = [tops_by_ref[idx] for tops_by_ref in target_tops_by_ref]
+        target_nn = _best_target_neighbor(target_tops) if target_index else None
         target_exact = (
             any(normalize_text(ref, config.normalization) in exact_target_set for ref in ref_texts)
             if exact_target_set is not None
@@ -55,7 +81,14 @@ def compute_exposure(
             else None
         )
         pair_nn = (
-            _compute_pair_neighbor(source_text, ref_texts, source_index, target_index, config)
+            _compute_pair_neighbor(
+                source_text=source_text,
+                ref_texts=ref_texts,
+                source_top=source_top,
+                target_tops=target_tops,
+                source_index=source_index,
+                target_index=target_index,
+            )
             if target_index is not None and ref_texts
             else None
         )
@@ -76,7 +109,7 @@ def compute_exposure(
                 bin=bin_name,
             )
         )
-    return exposures
+    return ExposureComputation(segments=exposures, backend=source_index.backend_info)
 
 
 def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -> ExposureSummary:
@@ -88,8 +121,16 @@ def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -
         ),
         target=(
             _summarize_side(
-                [segment.target_exposure for segment in exposures if segment.target_exposure is not None],
-                [bool(segment.target_exact) for segment in exposures if segment.target_exact is not None],
+                [
+                    segment.target_exposure
+                    for segment in exposures
+                    if segment.target_exposure is not None
+                ],
+                [
+                    bool(segment.target_exact)
+                    for segment in exposures
+                    if segment.target_exact is not None
+                ],
                 config.bins.leak_thresholds,
             )
             if any(segment.target_exposure is not None for segment in exposures)
@@ -97,8 +138,16 @@ def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -
         ),
         pair=(
             _summarize_side(
-                [segment.pair_exposure for segment in exposures if segment.pair_exposure is not None],
-                [bool(segment.pair_exact) for segment in exposures if segment.pair_exact is not None],
+                [
+                    segment.pair_exposure
+                    for segment in exposures
+                    if segment.pair_exposure is not None
+                ],
+                [
+                    bool(segment.pair_exact)
+                    for segment in exposures
+                    if segment.pair_exact is not None
+                ],
                 config.bins.leak_thresholds,
             )
             if any(segment.pair_exposure is not None for segment in exposures)
@@ -124,14 +173,13 @@ def _summarize_side(
             "exact_overlap": None,
             "at_threshold": {f"{threshold:.2f}": None for threshold in thresholds},
         }
-    arr = np.array(scores, dtype=float)
     return {
         "mean": float(mean(scores)),
         "median": float(median(scores)),
-        "p05": float(np.percentile(arr, 5)),
-        "p25": float(np.percentile(arr, 25)),
-        "p75": float(np.percentile(arr, 75)),
-        "p95": float(np.percentile(arr, 95)),
+        "p05": _percentile(scores, 5),
+        "p25": _percentile(scores, 25),
+        "p75": _percentile(scores, 75),
+        "p95": _percentile(scores, 95),
         "max": float(max(scores)),
         "exact_overlap": sum(exact_flags) / len(exact_flags) if exact_flags else None,
         "at_threshold": {
@@ -141,15 +189,27 @@ def _summarize_side(
     }
 
 
-def _best_target_neighbor(
-    ref_texts: list[str],
-    target_index: NgramInvertedIndex | None,
-) -> NeighborResult | None:
-    if target_index is None or not ref_texts:
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        raise ValueError("cannot compute a percentile of an empty list")
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+    rank = (percentile / 100.0) * (len(sorted_values) - 1)
+    lower = int(rank)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    weight = rank - lower
+    return float(sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight)
+
+
+def _best_target_neighbor(target_tops: list[list[NeighborResult]]) -> NeighborResult | None:
+    if not target_tops:
         return None
     best = NeighborResult(index=None, score=0.0, exact=False)
-    for ref in ref_texts:
-        result = target_index.query_best(ref)
+    for top_results in target_tops:
+        if not top_results:
+            continue
+        result = top_results[0]
         best_index = best.index if best.index is not None else 10**18
         result_index = result.index if result.index is not None else 10**18
         if result.score > best.score or (result.score == best.score and result_index < best_index):
@@ -160,16 +220,17 @@ def _best_target_neighbor(
 def _compute_pair_neighbor(
     source_text: str,
     ref_texts: list[str],
+    source_top: list[NeighborResult],
+    target_tops: list[list[NeighborResult]],
     source_index: NgramInvertedIndex,
     target_index: NgramInvertedIndex | None,
-    config: ScoreConfig,
 ) -> NeighborResult:
     if target_index is None:
         return NeighborResult(index=None, score=0.0, exact=False)
 
-    candidates = _candidate_indices(source_index.query_topk(source_text, config.index.topk))
-    for ref in ref_texts:
-        candidates.update(_candidate_indices(target_index.query_topk(ref, config.index.topk)))
+    candidates = _candidate_indices(source_top)
+    for top_results in target_tops:
+        candidates.update(_candidate_indices(top_results))
 
     best = NeighborResult(index=None, score=0.0, exact=False)
     for candidate in sorted(candidates):
@@ -197,5 +258,5 @@ def _build_exact_pair_set(
             normalize_text(source, config.normalization),
             normalize_text(target, config.normalization),
         )
-        for source, target in zip(train_src, train_tgt)
+        for source, target in zip(train_src, train_tgt, strict=True)
     }

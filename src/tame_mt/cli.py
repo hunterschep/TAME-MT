@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
+
+import sacrebleu
 
 from tame_mt.api import TameScorer
+from tame_mt.artifacts import read_segment_jsonl
 from tame_mt.config import (
     BinConfig,
     IndexConfig,
@@ -17,7 +23,9 @@ from tame_mt.config import (
     parse_float_tuple,
     parse_int_tuple,
 )
-from tame_mt.io import read_lines, write_lines
+from tame_mt.exceptions import TameMTError
+from tame_mt.io import ensure_parent_dir, read_lines, write_lines
+from tame_mt.native import native_status
 from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
 from tame_mt.version import __version__
 
@@ -29,58 +37,144 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        return args.handler(args)
-    except ValueError as exc:
+        handler = cast(Callable[[argparse.Namespace], int], args.handler)
+        return handler(args)
+    except TameMTError as exc:
         print(f"tame-mt: error: {exc}", file=sys.stderr)
         return 2
+    except OSError as exc:
+        print(f"tame-mt: file error: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("tame-mt: interrupted", file=sys.stderr)
+        return 130
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tame-mt",
         description="Training-aware machine translation evaluation.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"tame-mt {__version__}")
 
     subparsers = parser.add_subparsers(dest="command")
 
-    score_parser = subparsers.add_parser("score", help="run full train-aware MT scoring")
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="show install, backend, and dependency status",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    doctor_parser.set_defaults(handler=run_doctor)
+
+    score_parser = subparsers.add_parser(
+        "score",
+        help="run full train-aware MT scoring",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     _add_config_args(score_parser)
-    _add_segment_args(score_parser)
-    score_parser.add_argument("--train-src", required=True)
-    score_parser.add_argument("--train-tgt", required=True)
-    score_parser.add_argument("--test-src", required=True)
-    score_parser.add_argument("--ref", action="append", required=True)
-    score_parser.add_argument("--hyp", required=True)
-    score_parser.add_argument("--json-out")
-    score_parser.add_argument("--segment-out")
-    score_parser.add_argument("--tm-out")
-    score_parser.add_argument("--quiet", action="store_true")
-    score_parser.add_argument("--verbose", action="store_true")
+    _add_segment_args(score_parser, include_hyp=True)
+    score_parser.add_argument("--train-src", required=True, help="training source text file")
+    score_parser.add_argument("--train-tgt", required=True, help="training target text file")
+    score_parser.add_argument("--test-src", required=True, help="test source text file")
+    score_parser.add_argument(
+        "--ref", action="append", required=True, help="reference file; repeat for multi-ref"
+    )
+    score_parser.add_argument("--hyp", required=True, help="system hypothesis text file")
+    score_parser.add_argument("--json-out", help="write the full JSON report")
+    score_parser.add_argument("--segment-out", help="write per-segment JSONL diagnostics")
+    score_parser.add_argument("--tm-out", help="write translation-memory baseline hypotheses")
+    score_parser.add_argument(
+        "--quiet", action="store_true", help="suppress human-readable stdout report"
+    )
+    score_parser.add_argument(
+        "--verbose", action="store_true", help="reserved for future progress reporting"
+    )
     score_parser.set_defaults(handler=run_score)
 
-    audit_parser = subparsers.add_parser("audit", help="audit train-test exposure without system outputs")
+    audit_parser = subparsers.add_parser(
+        "audit",
+        help="audit train-test exposure without system outputs",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     _add_config_args(audit_parser)
-    _add_segment_args(audit_parser)
-    audit_parser.add_argument("--train-src", required=True)
-    audit_parser.add_argument("--train-tgt")
-    audit_parser.add_argument("--test-src", required=True)
-    audit_parser.add_argument("--ref", action="append")
-    audit_parser.add_argument("--json-out")
-    audit_parser.add_argument("--segment-out")
-    audit_parser.add_argument("--quiet", action="store_true")
-    audit_parser.add_argument("--verbose", action="store_true")
+    _add_segment_args(audit_parser, include_hyp=False)
+    audit_parser.add_argument("--train-src", required=True, help="training source text file")
+    audit_parser.add_argument("--train-tgt", help="training target text file")
+    audit_parser.add_argument("--test-src", required=True, help="test source text file")
+    audit_parser.add_argument("--ref", action="append", help="reference file; repeat for multi-ref")
+    audit_parser.add_argument("--json-out", help="write the full JSON report")
+    audit_parser.add_argument("--segment-out", help="write per-segment JSONL diagnostics")
+    audit_parser.add_argument(
+        "--quiet", action="store_true", help="suppress human-readable stdout report"
+    )
+    audit_parser.add_argument(
+        "--verbose", action="store_true", help="reserved for future progress reporting"
+    )
     audit_parser.set_defaults(handler=run_audit)
 
-    tm_parser = subparsers.add_parser("tm-baseline", help="write nearest-neighbor TM hypotheses")
+    cached_parser = subparsers.add_parser(
+        "score-cached",
+        help="score a hypothesis using cached segment diagnostics from a prior audit",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_config_args(cached_parser)
+    cached_parser.add_argument("--segment-in", required=True, help="segment JSONL from audit/score")
+    cached_parser.add_argument("--ref", action="append", required=True, help="reference file")
+    cached_parser.add_argument("--hyp", required=True, help="system hypothesis text file")
+    cached_parser.add_argument(
+        "--num-train", type=int, required=True, help="training segment count"
+    )
+    cached_parser.add_argument("--json-out", help="write the full JSON report")
+    cached_parser.add_argument(
+        "--quiet", action="store_true", help="suppress human-readable stdout report"
+    )
+    cached_parser.set_defaults(handler=run_score_cached)
+
+    tm_parser = subparsers.add_parser(
+        "tm-baseline",
+        help="write nearest-neighbor TM hypotheses",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     _add_config_args(tm_parser)
-    tm_parser.add_argument("--train-src", required=True)
-    tm_parser.add_argument("--train-tgt", required=True)
-    tm_parser.add_argument("--test-src", required=True)
-    tm_parser.add_argument("--out", required=True)
-    tm_parser.add_argument("--metadata-out")
+    tm_parser.add_argument("--train-src", required=True, help="training source text file")
+    tm_parser.add_argument("--train-tgt", required=True, help="training target text file")
+    tm_parser.add_argument("--test-src", required=True, help="test source text file")
+    tm_parser.add_argument(
+        "--out", required=True, help="write translation-memory baseline hypotheses"
+    )
+    tm_parser.add_argument("--metadata-out", help="write JSONL nearest-neighbor metadata")
     tm_parser.set_defaults(handler=run_tm_baseline)
     return parser
+
+
+def run_doctor(args: argparse.Namespace) -> int:
+    _ = args
+    status = native_status()
+    lines = [
+        f"TAME-MT: {__version__}",
+        f"Python: {platform.python_version()}",
+        f"Platform: {platform.platform()}",
+        f"SacreBLEU: {sacrebleu.__version__}",
+    ]
+    if status.available:
+        lines.extend(
+            [
+                "Native backend: available",
+                f"Native backend version: {status.version}",
+                "Default backend: auto -> native_exact/native_fast",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Native backend: unavailable",
+                f"Reason: {status.error}",
+                "Default backend: auto -> python_exact/python_fast fallback",
+            ]
+        )
+    print("\n".join(lines))
+    return 0
 
 
 def run_score(args: argparse.Namespace) -> int:
@@ -150,6 +244,26 @@ def run_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_score_cached(args: argparse.Namespace) -> int:
+    config = _config_from_args(args)
+    exposures, tm_results = read_segment_jsonl(args.segment_in)
+    refs = [read_lines(path) for path in args.ref]
+    hyp = read_lines(args.hyp)
+    scorer = TameScorer(config)
+    report = scorer.score_from_artifacts(
+        exposures=exposures,
+        tm_results=tm_results,
+        refs=refs,
+        hyp=hyp,
+        num_train=args.num_train,
+    )
+    if args.json_out:
+        write_json_report(args.json_out, report)
+    if not args.quiet:
+        print(render_text_report(report))
+    return 0
+
+
 def run_tm_baseline(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
     train_src = read_lines(args.train_src)
@@ -160,7 +274,9 @@ def run_tm_baseline(args: argparse.Namespace) -> int:
     result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs=None, hyp=None)
     write_lines(args.out, result.tm_hyp)
     if args.metadata_out:
-        with Path(args.metadata_out).open("w", encoding="utf-8") as handle:
+        metadata_path = Path(args.metadata_out)
+        ensure_parent_dir(metadata_path)
+        with metadata_path.open("w", encoding="utf-8") as handle:
             for item in result.tm_results:
                 handle.write(
                     json.dumps(
@@ -177,49 +293,150 @@ def run_tm_baseline(args: argparse.Namespace) -> int:
 
 
 def _add_config_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--metrics", nargs="+", default=["bleu", "chrf"], choices=["bleu", "chrf"])
-    parser.add_argument("--ngram-orders", default="3,4,5")
-    parser.add_argument("--far-threshold", type=float, default=0.30)
-    parser.add_argument("--near-threshold", type=float, default=0.70)
-    parser.add_argument("--leak-thresholds", default="0.70,0.85,0.95")
-    parser.add_argument("--pair-k", type=int, default=50)
-    parser.add_argument("--lowercase", action="store_true")
-    parser.add_argument("--strip-diacritics", action="store_true")
-    parser.add_argument("--normalize-punctuation", action="store_true")
-    parser.add_argument("--bleu-tokenize", default="13a")
-    parser.add_argument("--bleu-lowercase", action="store_true")
-    parser.add_argument("--chrf-word-order", type=int, default=2)
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        default=["bleu", "chrf"],
+        help="metrics to report; accepts space or comma separation",
+    )
+    parser.add_argument(
+        "--ngram-orders", default="3,4,5", help="comma-separated character n-gram orders"
+    )
+    parser.add_argument(
+        "--far-threshold", type=float, default=0.30, help="upper bound for source-far examples"
+    )
+    parser.add_argument(
+        "--near-threshold", type=float, default=0.70, help="lower bound for source-near examples"
+    )
+    parser.add_argument(
+        "--leak-thresholds", default="0.70,0.85,0.95", help="comma-separated exposure thresholds"
+    )
+    parser.add_argument(
+        "--pair-k", type=int, default=50, help="top-k source/target candidates for pair reranking"
+    )
+    parser.add_argument(
+        "--index-mode",
+        choices=[
+            "auto",
+            "inverted_exact",
+            "inverted_fast",
+            "python_exact",
+            "python_fast",
+            "native_exact",
+            "native_fast",
+        ],
+        default="auto",
+        help="nearest-neighbor retrieval mode",
+    )
+    parser.add_argument(
+        "--auto-exact-cutoff",
+        type=int,
+        default=5_000,
+        help="auto mode uses exact retrieval up to this training size",
+    )
+    parser.add_argument(
+        "--candidate-gram-limit",
+        type=int,
+        default=8,
+        help="fast mode: rare query grams used for candidate generation",
+    )
+    parser.add_argument(
+        "--posting-limit",
+        type=int,
+        default=500,
+        help="fast mode: maximum posting entries read per selected query gram",
+    )
+    parser.add_argument(
+        "--max-candidates",
+        type=int,
+        default=3_000,
+        help="fast mode: maximum candidate segments generated per query",
+    )
+    parser.add_argument(
+        "--rerank-limit",
+        type=int,
+        default=1_000,
+        help="fast mode: approximate candidates kept for exact Jaccard reranking",
+    )
+    parser.add_argument(
+        "--min-bin-size-warning", type=int, default=30, help="warn when a bin has fewer segments"
+    )
+    parser.add_argument(
+        "--tm-zero-policy",
+        choices=["empty", "nearest"],
+        default="empty",
+        help="TM output when no source grams overlap",
+    )
+    parser.add_argument(
+        "--lowercase", action="store_true", help="case-fold text before similarity computation"
+    )
+    parser.add_argument(
+        "--strip-diacritics",
+        action="store_true",
+        help="strip diacritics before similarity computation",
+    )
+    parser.add_argument(
+        "--normalize-punctuation",
+        action="store_true",
+        help="normalize common punctuation before similarity computation",
+    )
+    parser.add_argument("--bleu-tokenize", default="13a", help="SacreBLEU tokenization setting")
+    parser.add_argument(
+        "--bleu-lowercase", action="store_true", help="lowercase for SacreBLEU BLEU scoring"
+    )
+    parser.add_argument(
+        "--chrf-word-order", type=int, default=2, help="SacreBLEU chrF word-order setting"
+    )
 
 
-def _add_segment_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--include-neighbor-text", action="store_true")
-    parser.add_argument("--include-source-text", action="store_true")
-    parser.add_argument("--include-reference-text", action="store_true")
-    parser.add_argument("--include-hyp-text", action="store_true")
+def _add_segment_args(parser: argparse.ArgumentParser, *, include_hyp: bool) -> None:
+    parser.add_argument(
+        "--include-neighbor-text",
+        action="store_true",
+        help="include raw nearest-neighbor training text in JSONL",
+    )
+    parser.add_argument(
+        "--include-source-text", action="store_true", help="include raw test source text in JSONL"
+    )
+    parser.add_argument(
+        "--include-reference-text", action="store_true", help="include raw reference text in JSONL"
+    )
+    if include_hyp:
+        parser.add_argument(
+            "--include-hyp-text",
+            action="store_true",
+            help="include raw system hypothesis text in JSONL",
+        )
 
 
 def _config_from_args(args: argparse.Namespace) -> ScoreConfig:
     ngram_orders = parse_int_tuple(args.ngram_orders)
     leak_thresholds = parse_float_tuple(args.leak_thresholds)
-    if args.pair_k <= 0:
-        raise ValueError("--pair-k must be positive")
-    if args.far_threshold < 0 or args.near_threshold < 0 or args.far_threshold > args.near_threshold:
-        raise ValueError("--far-threshold must be non-negative and no larger than --near-threshold")
+    metrics = _parse_metrics(args.metrics)
     return ScoreConfig(
-        metrics=tuple(metric.lower() for metric in args.metrics),
+        metrics=metrics,
         normalization=NormalizationConfig(
             lowercase=args.lowercase,
             strip_diacritics=args.strip_diacritics,
             normalize_punctuation=args.normalize_punctuation,
         ),
         similarity=SimilarityConfig(ngram_orders=ngram_orders),
-        index=IndexConfig(topk=args.pair_k),
+        index=IndexConfig(
+            mode=args.index_mode,
+            topk=args.pair_k,
+            auto_exact_cutoff=args.auto_exact_cutoff,
+            candidate_gram_limit=args.candidate_gram_limit,
+            posting_limit=args.posting_limit,
+            max_candidates=args.max_candidates,
+            rerank_limit=args.rerank_limit,
+        ),
         bins=BinConfig(
             far_threshold=args.far_threshold,
             near_threshold=args.near_threshold,
             leak_thresholds=leak_thresholds,
+            min_bin_size_warning=args.min_bin_size_warning,
         ),
-        tm=TMConfig(),
+        tm=TMConfig(zero_policy=args.tm_zero_policy),
         metric=MetricConfig(
             bleu_tokenize=args.bleu_tokenize,
             bleu_lowercase=args.bleu_lowercase,
@@ -234,3 +451,10 @@ def _warn_neighbor_text(args: argparse.Namespace) -> None:
             "Warning: --include-neighbor-text may write raw training text to the segment report.",
             file=sys.stderr,
         )
+
+
+def _parse_metrics(values: list[str]) -> tuple[str, ...]:
+    parsed: list[str] = []
+    for value in values:
+        parsed.extend(part.strip().lower() for part in value.split(",") if part.strip())
+    return tuple(dict.fromkeys(parsed))

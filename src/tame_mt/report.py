@@ -6,20 +6,24 @@ from pathlib import Path
 from typing import Any
 
 from tame_mt.config import ScoreConfig
+from tame_mt.io import ensure_parent_dir
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.version import __version__
 
 
-def build_signature(config: ScoreConfig) -> str:
+def build_signature(config: ScoreConfig, backend_name: str | None = None) -> str:
     norm = _normalization_signature(config)
     orders = _orders_signature(config.similarity.ngram_orders)
     leaks = ",".join(f"{threshold:.2f}" for threshold in config.bins.leak_thresholds)
     metrics = ",".join(metric.lower() for metric in config.metrics)
+    backend = backend_name or config.index.mode
     return (
         f"tame-mt|v:{__version__}|norm:{norm}|sim:char_jaccard_{orders}_set|"
-        f"idx:inv_exact|tm:src_nn_top1_zero_{config.tm.zero_policy}|"
+        f"idx:{config.index.mode}|backend:{backend}|tm:src_nn_top1_zero_{config.tm.zero_policy}|"
         f"bins:far{config.bins.far_threshold:.2f}_near{config.bins.near_threshold:.2f}_leak{leaks}|"
-        f"pair_k:{config.index.topk}|metrics:{metrics}|"
+        f"pair_k:{config.index.topk}|fast:{config.index.candidate_gram_limit},"
+        f"{config.index.posting_limit},{config.index.max_candidates},"
+        f"{config.index.rerank_limit}|metrics:{metrics}|"
         f"sacrebleu:bleu_tok_{config.metric.bleu_tokenize}_lc_{int(config.metric.bleu_lowercase)}_"
         f"chrf_wo_{config.metric.chrf_word_order}"
     )
@@ -39,7 +43,7 @@ def config_to_dict(config: ScoreConfig) -> dict[str, Any]:
             "leak_thresholds": list(config.bins.leak_thresholds),
             "min_bin_size_warning": config.bins.min_bin_size_warning,
         },
-        "pair": {"pair_k": config.index.topk},
+        "pair": {"pair_k": config.index.topk, "mode": "topk_rerank"},
         "tm": asdict(config.tm),
         "metrics": list(config.metrics),
         "sacrebleu": asdict(config.metric),
@@ -60,6 +64,7 @@ def render_text_report(report: TameReport) -> str:
             "",
         ]
     )
+    lines.extend(_render_backend(report))
     lines.extend(_render_quality(report))
     lines.extend(_render_exposure(report))
     lines.extend(_render_bins(report))
@@ -72,8 +77,24 @@ def render_text_report(report: TameReport) -> str:
     return "\n".join(lines)
 
 
+def _render_backend(report: TameReport) -> list[str]:
+    backend = report.backend
+    exactness = "exact" if backend.get("exact") else "approximate"
+    native = "native" if backend.get("native") else "python"
+    return [
+        "Backend",
+        "-------",
+        f"Name:            {backend.get('name', 'unknown')}",
+        f"Engine:          {native}",
+        f"Retrieval:       {exactness}",
+        "",
+    ]
+
+
 def write_json_report(path: str | Path, report: TameReport) -> None:
-    with Path(path).open("w", encoding="utf-8") as handle:
+    output_path = Path(path)
+    ensure_parent_dir(output_path)
+    with output_path.open("w", encoding="utf-8") as handle:
         json.dump(report.to_dict(), handle, ensure_ascii=False, indent=2)
         handle.write("\n")
 
@@ -93,7 +114,9 @@ def write_segment_jsonl(
     include_hyp_text: bool = False,
 ) -> None:
     tm_by_index = {result.index: result for result in tm_results}
-    with Path(path).open("w", encoding="utf-8") as handle:
+    output_path = Path(path)
+    ensure_parent_dir(output_path)
+    with output_path.open("w", encoding="utf-8") as handle:
         for segment in exposures:
             tm_result = tm_by_index.get(segment.index)
             payload: dict[str, Any] = {
@@ -115,7 +138,11 @@ def write_segment_jsonl(
             if include_source_text:
                 payload["source_text"] = test_src[segment.index]
             if include_reference_text and refs:
-                payload["reference_text"] = refs[0][segment.index]
+                ref_texts = [ref[segment.index] for ref in refs]
+                if len(ref_texts) == 1:
+                    payload["reference_text"] = ref_texts[0]
+                else:
+                    payload["reference_texts"] = ref_texts
             if include_hyp_text and hyp:
                 payload["hyp_text"] = hyp[segment.index]
             if include_neighbor_text and segment.source_nn_index is not None:

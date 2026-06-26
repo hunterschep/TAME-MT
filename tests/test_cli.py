@@ -3,13 +3,12 @@ from pathlib import Path
 
 from tame_mt.cli import main
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
-    json_out = tmp_path / "report.json"
-    segment_out = tmp_path / "segments.jsonl"
+    json_out = tmp_path / "nested" / "report.json"
+    segment_out = tmp_path / "nested" / "segments.jsonl"
     rc = main(
         [
             "score",
@@ -27,6 +26,8 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
             str(json_out),
             "--segment-out",
             str(segment_out),
+            "--metrics",
+            "bleu,chrf",
             "--quiet",
         ]
     )
@@ -38,6 +39,14 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
     segment_lines = segment_out.read_text(encoding="utf-8").splitlines()
     assert len(segment_lines) == 4
     assert json.loads(segment_lines[0])["source_exact"] is True
+
+
+def test_cli_doctor_reports_environment(capsys) -> None:
+    rc = main(["doctor"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "TAME-MT:" in captured.out
+    assert "Native backend:" in captured.out
 
 
 def test_cli_tm_baseline_writes_aligned_output(tmp_path: Path) -> None:
@@ -57,3 +66,142 @@ def test_cli_tm_baseline_writes_aligned_output(tmp_path: Path) -> None:
     )
     assert rc == 0
     assert len(out.read_text(encoding="utf-8").splitlines()) == 4
+
+
+def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
+    full_json = tmp_path / "full.json"
+    cached_json = tmp_path / "cached.json"
+    segments = tmp_path / "segments.jsonl"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--json-out",
+            str(full_json),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--json-out",
+            str(cached_json),
+            "--quiet",
+        ]
+    )
+    assert full_rc == 0
+    assert cached_rc == 0
+    full = json.loads(full_json.read_text(encoding="utf-8"))
+    cached = json.loads(cached_json.read_text(encoding="utf-8"))
+    assert cached["quality"] == full["quality"]
+    assert cached["exposure"] == full["exposure"]
+
+
+def test_cli_score_cached_reports_bad_segment_jsonl(tmp_path: Path, capsys) -> None:
+    bad_segments = tmp_path / "bad.jsonl"
+    bad_segments.write_text("{not-json}\n", encoding="utf-8")
+    rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(bad_segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "invalid JSON" in captured.err
+
+
+def test_cli_audit_source_only_works(tmp_path: Path) -> None:
+    json_out = tmp_path / "audit.json"
+    rc = main(
+        [
+            "audit",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert payload["quality"]["tm"] == {"bleu": None, "chrf": None}
+    assert payload["exposure"]["target"] is None
+    assert payload["exposure"]["pair"] is None
+
+
+def test_cli_reports_alignment_errors(tmp_path: Path, capsys) -> None:
+    short_hyp = tmp_path / "short.out"
+    short_hyp.write_text("only one line\n", encoding="utf-8")
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(short_hyp),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "misaligned input files" in captured.err
+
+
+def test_cli_reports_configuration_errors(capsys) -> None:
+    rc = main(
+        [
+            "score",
+            "--ngram-orders",
+            "",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "expected a comma-separated list of integers" in captured.err

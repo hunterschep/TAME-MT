@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -53,6 +54,7 @@ class TameReport:
     num_test: int
     num_refs: int
     config: dict[str, Any]
+    backend: dict[str, Any]
     system_scores: dict[str, float | None]
     tm_scores: dict[str, float | None]
     delta_scores: dict[str, float | None]
@@ -63,6 +65,7 @@ class TameReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": "0.1",
             "tame_version": self.tame_version,
             "signature": self.signature,
             "data": {
@@ -71,6 +74,7 @@ class TameReport:
                 "num_refs": self.num_refs,
             },
             "config": self.config,
+            "backend": self.backend,
             "quality": {
                 "system": self.system_scores,
                 "tm": self.tm_scores,
@@ -92,3 +96,6 @@ class TameReport:
             "generalization_gap": self.generalization_gap,
             "warnings": self.warnings,
         }
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)

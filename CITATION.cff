@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use TAME-MT, please cite it using this metadata."
+title: "TAME-MT: Training-Aware Machine Translation Evaluation for Machine Translation"
+version: "0.1.0"
+date-released: "2026-06-26"
+authors:
+  - family-names: "Scheppat"
+    given-names: "Hunter M"
+license: "MIT"
+repository-code: "https://github.com/hunterschep/TAME-MT"

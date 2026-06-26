@@ -4,8 +4,9 @@ from dataclasses import dataclass
 
 from tame_mt.bins import compute_generalization_gap, score_bins
 from tame_mt.config import ScoreConfig
-from tame_mt.exposure import compute_exposure, summarize_exposures
-from tame_mt.io import read_lines, validate_parallel_lengths
+from tame_mt.exceptions import InputDataError
+from tame_mt.exposure import compute_exposure_result, summarize_exposures
+from tame_mt.io import read_lines, validate_corpus_inputs, validate_equal_lengths
 from tame_mt.report import build_signature, config_to_dict
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.scoring import delta_scores, score_metrics
@@ -16,6 +17,8 @@ from tame_mt.warnings import generate_warnings
 
 @dataclass
 class EvaluationResult:
+    """Full evaluation result, including report and optional artifacts."""
+
     report: TameReport
     exposures: list[SegmentExposure]
     tm_hyp: list[str]
@@ -23,6 +26,8 @@ class EvaluationResult:
 
 
 class TameScorer:
+    """Compute TAME-MT reports from files or in-memory corpora."""
+
     def __init__(self, config: ScoreConfig | None = None) -> None:
         self.config = config or ScoreConfig()
 
@@ -71,6 +76,62 @@ class TameScorer:
     ) -> TameReport:
         return self.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp).report
 
+    def score_from_artifacts(
+        self,
+        exposures: list[SegmentExposure],
+        tm_results: list[SegmentTMResult],
+        refs: list[list[str]],
+        hyp: list[str],
+        num_train: int,
+    ) -> TameReport:
+        if not exposures:
+            raise InputDataError("segment artifact must contain at least one segment")
+        tm_hyp = [result.tm_hyp for result in tm_results]
+        validate_equal_lengths("segments", exposures, "tm_results", tm_results)
+        for ref_idx, ref in enumerate(refs):
+            validate_equal_lengths("segments", exposures, f"ref[{ref_idx}]", ref)
+        validate_equal_lengths("segments", exposures, "hyp", hyp)
+        validate_equal_lengths("segments", exposures, "tm_hyp", tm_hyp)
+
+        system_scores: dict[str, float | None] = score_metrics(hyp, refs, self.config)
+        tm_scores: dict[str, float | None] = score_metrics(tm_hyp, refs, self.config)
+        deltas = delta_scores(system_scores, tm_scores, self.config.metrics)
+        bin_reports = score_bins(hyp, tm_hyp, refs, exposures, self.config)
+        gen_gap = compute_generalization_gap(bin_reports, self.config.metrics)
+        exposure_summary = summarize_exposures(exposures, self.config)
+        warnings = generate_warnings(
+            exposure=exposure_summary,
+            system_scores=system_scores,
+            tm_scores=tm_scores,
+            bin_reports=bin_reports,
+            generalization_gap=gen_gap,
+            config=self.config,
+            num_test=len(exposures),
+        )
+        return TameReport(
+            tame_version=__version__,
+            signature=build_signature(self.config, backend_name="cached_segments"),
+            num_train=num_train,
+            num_test=len(exposures),
+            num_refs=len(refs),
+            config=config_to_dict(self.config),
+            backend={
+                "name": "cached_segments",
+                "native": False,
+                "exact": False,
+                "requested_mode": self.config.index.mode,
+                "resolved_mode": "cached_segments",
+                "index_reused": True,
+            },
+            system_scores=system_scores,
+            tm_scores=tm_scores,
+            delta_scores=deltas,
+            exposure=exposure_summary,
+            bins=bin_reports,
+            generalization_gap=gen_gap,
+            warnings=warnings,
+        )
+
     def evaluate_corpus(
         self,
         train_src: list[str],
@@ -79,30 +140,39 @@ class TameScorer:
         refs: list[list[str]] | None,
         hyp: list[str] | None = None,
     ) -> EvaluationResult:
-        validate_parallel_lengths(train_src=train_src, train_tgt=train_tgt, test_src=test_src, refs=refs, hyp=hyp)
-        if hyp is not None and refs is None:
-            raise ValueError("refs are required when hyp is provided")
+        validate_corpus_inputs(
+            train_src=train_src,
+            train_tgt=train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=hyp,
+        )
+        if train_tgt is None and hyp is not None:
+            raise InputDataError(
+                "train.tgt is required for full scoring because the TM baseline needs targets"
+            )
 
-        exposures = compute_exposure(train_src, train_tgt, test_src, refs, self.config)
+        exposure_result = compute_exposure_result(train_src, train_tgt, test_src, refs, self.config)
+        exposures = exposure_result.segments
         tm_hyp: list[str] = []
         tm_results: list[SegmentTMResult] = []
         if train_tgt is not None:
             tm_hyp, tm_results = build_tm_hypotheses(train_tgt, exposures, self.config)
 
-        system_scores = (
+        system_scores: dict[str, float | None] = (
             score_metrics(hyp, refs, self.config)
             if hyp is not None and refs is not None
-            else {metric: None for metric in self.config.metrics}
+            else _empty_metric_scores(self.config)
         )
-        tm_scores = (
+        tm_scores: dict[str, float | None] = (
             score_metrics(tm_hyp, refs, self.config)
             if tm_hyp and refs is not None
-            else {metric: None for metric in self.config.metrics}
+            else _empty_metric_scores(self.config)
         )
-        deltas = (
+        deltas: dict[str, float | None] = (
             delta_scores(system_scores, tm_scores, self.config.metrics)
             if hyp is not None
-            else {metric: None for metric in self.config.metrics}
+            else _empty_metric_scores(self.config)
         )
         bin_reports = score_bins(hyp, tm_hyp if tm_hyp else None, refs, exposures, self.config)
         gen_gap = compute_generalization_gap(bin_reports, self.config.metrics)
@@ -118,11 +188,19 @@ class TameScorer:
         )
         report = TameReport(
             tame_version=__version__,
-            signature=build_signature(self.config),
+            signature=build_signature(self.config, backend_name=exposure_result.backend.name),
             num_train=len(train_src),
             num_test=len(test_src),
             num_refs=len(refs) if refs else 0,
             config=config_to_dict(self.config),
+            backend={
+                "name": exposure_result.backend.name,
+                "native": exposure_result.backend.native,
+                "exact": exposure_result.backend.exact,
+                "requested_mode": exposure_result.backend.requested_mode,
+                "resolved_mode": exposure_result.backend.resolved_mode,
+                "index_reused": False,
+            },
             system_scores=system_scores,
             tm_scores=tm_scores,
             delta_scores=deltas,
@@ -169,3 +247,7 @@ def audit(
         test_src=test_src_path,
         refs=ref_paths,
     )
+
+
+def _empty_metric_scores(config: ScoreConfig) -> dict[str, float | None]:
+    return {metric: None for metric in config.metrics}

@@ -27,7 +27,7 @@ def weighted_bleu(
     weighted_hyp_len = 0.0
     weighted_ref_len = 0.0
 
-    for hyp, ref, weight in zip(hyps, refs, weights):
+    for hyp, ref, weight in zip(hyps, refs, weights, strict=True):
         hyp_tokens = hyp.split()
         ref_tokens = ref.split()
         weighted_hyp_len += weight * len(hyp_tokens)

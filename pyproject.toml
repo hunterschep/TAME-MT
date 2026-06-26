@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
 
 [project]
 name = "tame-mt"
@@ -16,31 +16,58 @@ keywords = ["machine translation", "evaluation", "bleu", "chrf", "low-resource"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
+  "Natural Language :: English",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
+  "Typing :: Typed",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Text Processing :: Linguistic",
 ]
 dependencies = [
-  "numpy>=1.23",
   "sacrebleu>=2.0",
-  "tqdm>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/hunterschep/TAME-MT"
+Repository = "https://github.com/hunterschep/TAME-MT"
+Issues = "https://github.com/hunterschep/TAME-MT/issues"
 
 [project.optional-dependencies]
 dev = [
   "build>=1.0",
+  "maturin>=1.7,<2",
+  "mypy>=1.8",
   "pytest>=7.0",
+  "ruff>=0.5",
+  "twine>=5.0",
 ]
 
 [project.scripts]
 tame-mt = "tame_mt.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.maturin]
+exclude = ["demo_runs/**", "dist/**", "target/**"]
+features = ["pyo3/extension-module"]
+module-name = "tame_mt._native"
+python-source = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["tame_mt"]
+strict = true
+ignore_missing_imports = true

@@ -49,6 +49,35 @@ Optional metadata:
 --metadata-out tm_metadata.jsonl
 ```
 
+## Cached Scoring
+
+For large corpora or repeated system comparisons, cache segment diagnostics once:
+
+```bash
+tame-mt audit \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --test-src test.src \
+  --ref test.ref \
+  --segment-out segments.jsonl \
+  --json-out audit.json
+```
+
+Then score each system without rebuilding the training index:
+
+```bash
+tame-mt score-cached \
+  --segment-in segments.jsonl \
+  --ref test.ref \
+  --hyp system.out \
+  --num-train 125000 \
+  --json-out system.tame.json
+```
+
+`score-cached` reuses source/target/pair exposure and TM hypotheses from the
+segment JSONL file. It recomputes only system metrics, TM metrics, delta over
+TM, bin scores, warnings, and the final report.
+
 ## Shared Options
 
 ```bash
@@ -58,6 +87,14 @@ Optional metadata:
 --near-threshold 0.70
 --leak-thresholds 0.70,0.85,0.95
 --pair-k 50
+--index-mode auto
+--auto-exact-cutoff 5000
+--candidate-gram-limit 8
+--posting-limit 500
+--max-candidates 3000
+--rerank-limit 1000
+--min-bin-size-warning 30
+--tm-zero-policy empty
 --lowercase
 --strip-diacritics
 --normalize-punctuation
@@ -65,6 +102,16 @@ Optional metadata:
 --bleu-lowercase
 --chrf-word-order 2
 ```
+
+## Doctor
+
+```bash
+tame-mt doctor
+```
+
+`doctor` prints the TAME-MT version, Python/platform details, SacreBLEU
+version, and whether the native Rust backend is importable. Use it first when a
+large run seems unexpectedly slow.
 
 ## Segment Text Options
 
@@ -80,3 +127,49 @@ but not raw source/reference/hypothesis/neighbor text.
 
 `--include-neighbor-text` may write raw training text and should be used only
 when that is appropriate for the corpus.
+
+## Exit Behavior
+
+TAME-MT returns exit code `0` on success and `2` for user-facing input,
+alignment, configuration, or file errors. It preserves empty lines inside input
+files as aligned segments, but it rejects empty training-source or test-source
+files.
+
+## Metric Selection
+
+Metrics can be passed as separate arguments:
+
+```bash
+--metrics bleu chrf
+```
+
+or comma-separated:
+
+```bash
+--metrics bleu,chrf
+```
+
+## Retrieval Performance
+
+`--index-mode auto` is the default. It uses `native_exact` or `native_fast`
+when the Rust extension is installed. If the native extension is unavailable,
+it falls back to `python_exact` or `python_fast`.
+
+Use exact mode explicitly when the corpus is small or when exact nearest-neighbor
+exposure is required:
+
+```bash
+--index-mode native_exact
+```
+
+Use fast mode explicitly for large public corpora:
+
+```bash
+--index-mode native_fast
+```
+
+Fast mode selects rare query n-grams, reads bounded postings, keeps an
+approximate shortlist, and reranks that shortlist with exact Jaccard similarity.
+
+The older `inverted_exact` and `inverted_fast` names remain accepted as
+pure-Python aliases for compatibility.
