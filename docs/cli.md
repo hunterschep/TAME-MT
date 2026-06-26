@@ -77,8 +77,8 @@ Inspect metadata without loading the native indexes:
 tame-mt index inspect train.tameidx
 ```
 
-Index bundles store raw training text and normalized exact-match keys. Protect
-them with the same access controls as the original training corpus.
+Index bundles store raw training text and normalized exact-match and pair keys.
+Protect them with the same access controls as the original training corpus.
 
 For large corpora or repeated system comparisons, cache segment diagnostics once:
 

@@ -98,8 +98,8 @@ result = TameScorer(config).evaluate_index_bundle(
 validates normalization, similarity, backend mode, and fast-mode settings before
 scoring so stale indexes do not silently produce mismatched signatures.
 
-Index bundles store raw training text and normalized exact-match keys. Treat
-them as training data.
+Index bundles store raw training text and normalized exact-match and pair keys.
+Treat them as training data.
 
 ## Cached Scoring
 

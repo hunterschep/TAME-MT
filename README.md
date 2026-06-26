@@ -592,9 +592,9 @@ On the local development machine, the OPUS-100 `de-en` public-corpus audit at
 50,000 training pairs and 2,000 test pairs completed in about 6 seconds with
 `native_fast`; `score-cached` on the saved segment diagnostics took under 2
 seconds for an additional hypothesis. On the 100,000 train / 2,000 test
-OPUS-100 `de-en` slice, a fresh `native_fast` audit took about 9.9 seconds, the
-one-time `.tameidx` build took about 9.7 seconds, and a later audit from the
-saved index took about 3.3 seconds with identical exposure outputs.
+OPUS-100 `de-en` slice, a fresh `native_fast` audit took about 10.0 seconds, the
+one-time `.tameidx` build took about 9.6 seconds, and a later audit from the
+saved index took about 2.3 seconds with identical exposure outputs.
 
 For production evaluation, use a staged workflow:
 
@@ -619,9 +619,9 @@ nearest-neighbor training text. Segment reports contain indices and scores
 unless raw text fields are explicitly requested.
 
 Index bundles created by `tame-mt index build` store raw training source/target
-lines and normalized exact-match keys so later runs can produce identical TM
-outputs and optional neighbor-text diagnostics. Do not publish `.tameidx` files
-unless the underlying training corpus can also be published.
+lines and normalized exact-match and pair keys so later runs can produce
+identical TM outputs and optional neighbor-text diagnostics. Do not publish
+`.tameidx` files unless the underlying training corpus can also be published.
 
 ## Limitations
 

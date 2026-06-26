@@ -13,6 +13,8 @@
 - Added persistent `.tameidx` native index bundles plus `tame-mt index build`,
   `tame-mt index inspect`, and `score`/`audit --index` reuse workflows for
   large training corpora.
+- Optimized native index reuse by avoiding duplicate Python exact maps and by
+  persisting normalized exact-pair keys for faster repeated audits.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

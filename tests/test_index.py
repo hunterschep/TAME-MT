@@ -111,3 +111,33 @@ def test_native_index_bytes_roundtrip_when_available() -> None:
     assert restored.batch_query_topk(["abcdeg", "नमस्ते दुनिया"], 2) == index.batch_query_topk(
         ["abcdeg", "नमस्ते दुनिया"], 2
     )
+
+
+def test_native_contains_exact_without_python_exact_map_when_available() -> None:
+    native_module = pytest.importorskip("tame_mt._native")
+    norm_config = NormalizationConfig()
+    sim_config = SimilarityConfig()
+    index_config = IndexConfig(mode="native_exact")
+    native_index = native_module.NativeNgramIndex(
+        ["hello world"],
+        list(sim_config.ngram_orders),
+        "exact",
+        index_config.candidate_gram_limit,
+        index_config.posting_limit,
+        index_config.max_candidates,
+        index_config.rerank_limit,
+    )
+    index = NgramInvertedIndex.from_native(
+        native_index=native_index,
+        norm_config=norm_config,
+        sim_config=sim_config,
+        index_config=index_config,
+        resolved_mode="native_exact",
+        lines=["hello world"],
+        normalized_lines=[],
+    )
+
+    assert index.normalized_lines == []
+    assert index.contains_exact_normalized("hello world") is True
+    assert index.contains_exact_normalized("goodbye") is False
+    assert index.score_candidate("hello world", 0) == 1.0

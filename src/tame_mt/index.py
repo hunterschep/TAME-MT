@@ -46,6 +46,7 @@ class NgramInvertedIndex:
         resolved_mode: str,
         backend_info: IndexBackendInfo,
         native_index: Any | None = None,
+        doc_count: int | None = None,
     ) -> None:
         self.normalized_lines = normalized_lines
         self.gram_sets = gram_sets
@@ -58,6 +59,7 @@ class NgramInvertedIndex:
         self.resolved_mode = resolved_mode
         self.backend_info = backend_info
         self._native_index = native_index
+        self.doc_count = doc_count if doc_count is not None else len(normalized_lines)
 
     @classmethod
     def build(
@@ -72,9 +74,6 @@ class NgramInvertedIndex:
         index_config = index_config or IndexConfig()
         resolved_mode = _resolve_mode(index_config, len(lines))
         normalized_lines = [normalize_text(line, norm_config) for line in lines]
-        exact_map: dict[str, list[int]] = defaultdict(list)
-        for idx, line in enumerate(normalized_lines):
-            exact_map[line].append(idx)
 
         if resolved_mode.startswith("native_"):
             try:
@@ -101,7 +100,7 @@ class NgramInvertedIndex:
                 normalized_lines=normalized_lines,
                 gram_sets=None,
                 postings=None,
-                exact_map={line: indices for line, indices in exact_map.items()},
+                exact_map={},
                 norm_config=norm_config,
                 sim_config=sim_config,
                 index_config=index_config,
@@ -114,8 +113,12 @@ class NgramInvertedIndex:
                     resolved_mode=resolved_mode,
                 ),
                 native_index=native_index,
+                doc_count=len(normalized_lines),
             )
 
+        exact_map: dict[str, list[int]] = defaultdict(list)
+        for idx, line in enumerate(normalized_lines):
+            exact_map[line].append(idx)
         gram_sets = [char_ngrams(line, sim_config.ngram_orders) for line in normalized_lines]
         postings: dict[str, list[int]] = defaultdict(list)
         for idx, grams in enumerate(gram_sets):
@@ -143,28 +146,36 @@ class NgramInvertedIndex:
     @classmethod
     def from_native(
         cls,
-        lines: list[str],
         native_index: Any,
         norm_config: NormalizationConfig,
         sim_config: SimilarityConfig,
         index_config: IndexConfig,
         resolved_mode: str,
+        lines: list[str] | None = None,
+        normalized_lines: list[str] | None = None,
     ) -> NgramInvertedIndex:
         if not resolved_mode.startswith("native_"):
             raise BackendError(
                 f"native index wrapper requires a native mode, got {resolved_mode!r}"
             )
 
-        normalized_lines = [normalize_text(line, norm_config) for line in lines]
-        exact_map: dict[str, list[int]] = defaultdict(list)
-        for idx, line in enumerate(normalized_lines):
-            exact_map[line].append(idx)
+        doc_count = int(native_index.doc_count())
+        if normalized_lines is None:
+            normalized_lines = (
+                [normalize_text(line, norm_config) for line in lines] if lines is not None else []
+            )
+        if normalized_lines and len(normalized_lines) != doc_count:
+            raise BackendError(
+                "native index document count does not match supplied normalized lines"
+            )
+        if lines is not None and len(lines) != doc_count:
+            raise BackendError("native index document count does not match supplied raw lines")
 
         return cls(
             normalized_lines=normalized_lines,
             gram_sets=None,
             postings=None,
-            exact_map={line: indices for line, indices in exact_map.items()},
+            exact_map={},
             norm_config=norm_config,
             sim_config=sim_config,
             index_config=index_config,
@@ -177,6 +188,7 @@ class NgramInvertedIndex:
                 resolved_mode=resolved_mode,
             ),
             native_index=native_index,
+            doc_count=doc_count,
         )
 
     def query_best(self, text: str) -> NeighborResult:
@@ -312,7 +324,7 @@ class NgramInvertedIndex:
         return results[:k]
 
     def score_candidate(self, text: str, index: int) -> float:
-        if index < 0 or index >= len(self.normalized_lines):
+        if index < 0 or index >= self.doc_count:
             raise IndexError(f"candidate index out of range: {index}")
         query_norm = normalize_text(text, self.norm_config)
         if self._native_index is not None:
@@ -340,6 +352,11 @@ class NgramInvertedIndex:
                 raise IndexError(f"candidate index out of range: {index}")
             scores[index] = jaccard(query_grams, self.gram_sets[index])
         return scores
+
+    def contains_exact_normalized(self, normalized_text: str) -> bool:
+        if self._native_index is not None:
+            return bool(self._native_index.contains_exact(normalized_text))
+        return normalized_text in self.exact_map
 
     def native_bytes(self) -> bytes:
         if self._native_index is None:

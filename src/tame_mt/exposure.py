@@ -6,6 +6,7 @@ from statistics import mean, median
 
 from tame_mt.bins import assign_bin_values
 from tame_mt.config import ScoreConfig
+from tame_mt.exact import build_exact_pair_keys, exact_pair_key
 from tame_mt.index import IndexBackendInfo, NeighborResult, NgramInvertedIndex
 from tame_mt.normalize import normalize_text
 from tame_mt.schema import ExposureSummary, SegmentExposure
@@ -35,6 +36,7 @@ def compute_exposure_result(
     config: ScoreConfig,
     source_index: NgramInvertedIndex | None = None,
     target_index: NgramInvertedIndex | None = None,
+    exact_pair_keys: set[str] | None = None,
 ) -> ExposureComputation:
     if source_index is None:
         source_index = NgramInvertedIndex.build(
@@ -50,9 +52,10 @@ def compute_exposure_result(
             sim_config=config.similarity,
             index_config=config.index,
         )
-    exact_source_set = set(source_index.normalized_lines)
-    exact_target_set = set(target_index.normalized_lines) if target_index else None
-    exact_pair_set = _build_exact_pair_set(train_src, train_tgt, config) if train_tgt else None
+    if train_tgt is not None and exact_pair_keys is None:
+        exact_pair_keys = _build_exact_pair_keys(
+            train_src, train_tgt, source_index, target_index, config
+        )
 
     retrieval_k = max(1, config.index.topk)
     source_tops_by_segment = source_index.batch_query_topk(test_src, retrieval_k)
@@ -67,22 +70,26 @@ def compute_exposure_result(
         source_top = source_tops_by_segment[idx]
         src_nn = source_top[0] if source_top else NeighborResult(index=None, score=0.0, exact=False)
         norm_source = normalize_text(source_text, config.normalization)
-        source_exact = norm_source in exact_source_set
+        source_exact = source_index.contains_exact_normalized(norm_source)
 
         ref_texts = [ref[idx] for ref in refs] if refs is not None else []
         target_tops = [tops_by_ref[idx] for tops_by_ref in target_tops_by_ref]
         target_nn = _best_target_neighbor(target_tops) if target_index else None
         target_exact = (
-            any(normalize_text(ref, config.normalization) in exact_target_set for ref in ref_texts)
-            if exact_target_set is not None
+            any(
+                target_index.contains_exact_normalized(normalize_text(ref, config.normalization))
+                for ref in ref_texts
+            )
+            if target_index is not None
             else None
         )
         pair_exact = (
             any(
-                (norm_source, normalize_text(ref, config.normalization)) in exact_pair_set
+                exact_pair_key(norm_source, normalize_text(ref, config.normalization))
+                in exact_pair_keys
                 for ref in ref_texts
             )
-            if exact_pair_set is not None
+            if exact_pair_keys is not None
             else None
         )
         pair_nn = (
@@ -256,17 +263,18 @@ def _candidate_indices(results: Iterable[NeighborResult]) -> set[int]:
     return {result.index for result in results if result.index is not None}
 
 
-def _build_exact_pair_set(
+def _build_exact_pair_keys(
     train_src: list[str],
     train_tgt: list[str] | None,
+    source_index: NgramInvertedIndex,
+    target_index: NgramInvertedIndex | None,
     config: ScoreConfig,
-) -> set[tuple[str, str]]:
+) -> set[str]:
     if train_tgt is None:
         return set()
-    return {
-        (
-            normalize_text(source, config.normalization),
-            normalize_text(target, config.normalization),
-        )
-        for source, target in zip(train_src, train_tgt, strict=True)
-    }
+    if target_index is not None and source_index.normalized_lines and target_index.normalized_lines:
+        return build_exact_pair_keys(source_index.normalized_lines, target_index.normalized_lines)
+    return build_exact_pair_keys(
+        (normalize_text(source, config.normalization) for source in train_src),
+        (normalize_text(target, config.normalization) for target in train_tgt),
+    )

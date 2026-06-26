@@ -67,16 +67,16 @@ pairs and 2,000 test pairs:
 | `tame-mt audit --segment-out` on prepared files | `native_fast` | ~6.4s |
 | `tame-mt score-cached` for one hypothesis | cached diagnostics | ~1.8s |
 | Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
-| OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~9.9s |
-| OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.7s |
-| OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~3.3s |
+| OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
+| OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
+| OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
 | Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
 
 The index-build step is the reusable training-corpus cost. The audit step is
 the train/test/reference diagnostic cost. The cached-score step is the
 repeated-system cost and is much closer to ordinary BLEU/chrF evaluation.
 
-The local OPUS-100 100k source+target `.tameidx` bundle was about 368 MB. That
+The local OPUS-100 100k source+target `.tameidx` bundle was about 383 MB. That
 is intentionally an uncompressed speed-oriented artifact, not a publication
 format.
 

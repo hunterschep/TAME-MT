@@ -83,4 +83,4 @@ run.
 
 Bundles are uncompressed zip containers by default. This favors load speed over
 minimum disk size. Because they contain raw training text and normalized
-exact-match keys, they should be handled as training data.
+exact-match and pair keys, they should be handled as training data.

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from tame_mt.config import ScoreConfig
+from tame_mt.exact import build_exact_pair_keys
 from tame_mt.exceptions import BackendError, ConfigurationError, InputDataError
 from tame_mt.index import NgramInvertedIndex
 from tame_mt.io import ensure_parent_dir, validate_equal_lengths
@@ -22,6 +23,7 @@ TRAIN_SRC_NAME = "train.src"
 TRAIN_TGT_NAME = "train.tgt"
 SOURCE_INDEX_NAME = "source.index.bin"
 TARGET_INDEX_NAME = "target.index.bin"
+EXACT_PAIR_KEYS_NAME = "exact_pairs.keys"
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class IndexBundle:
     train_tgt: list[str] | None
     source_index: NgramInvertedIndex
     target_index: NgramInvertedIndex | None
+    exact_pair_keys: set[str] | None
     manifest: dict[str, Any]
 
 
@@ -68,6 +71,14 @@ def save_index_bundle(
 
     source_index_bytes = source_index.native_bytes()
     target_index_bytes = target_index.native_bytes() if target_index is not None else None
+    exact_pair_keys = (
+        build_exact_pair_keys(source_index.normalized_lines, target_index.normalized_lines)
+        if target_index is not None
+        else None
+    )
+    exact_pair_keys_bytes = (
+        _encode_exact_pair_keys(exact_pair_keys) if exact_pair_keys is not None else None
+    )
     manifest = _build_manifest(
         train_src,
         train_tgt,
@@ -75,6 +86,7 @@ def save_index_bundle(
         target_index,
         source_index_bytes,
         target_index_bytes,
+        exact_pair_keys_bytes,
         config,
     )
     output_path = Path(path)
@@ -87,12 +99,15 @@ def save_index_bundle(
         archive.writestr(SOURCE_INDEX_NAME, source_index_bytes)
         if target_index_bytes is not None:
             archive.writestr(TARGET_INDEX_NAME, target_index_bytes)
+        if exact_pair_keys_bytes is not None:
+            archive.writestr(EXACT_PAIR_KEYS_NAME, exact_pair_keys_bytes)
 
     return IndexBundle(
         train_src=train_src,
         train_tgt=train_tgt,
         source_index=source_index,
         target_index=target_index,
+        exact_pair_keys=exact_pair_keys,
         manifest=manifest,
     )
 
@@ -119,7 +134,6 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
 
             source_backend = _backend_manifest(manifest, "source_backend")
             source_index = NgramInvertedIndex.from_native(
-                lines=train_src,
                 native_index=_load_native_bytes(
                     _read_bytes_member(archive, SOURCE_INDEX_NAME), "source"
                 ),
@@ -127,13 +141,15 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
                 sim_config=config.similarity,
                 index_config=config.index,
                 resolved_mode=str(source_backend["resolved_mode"]),
+                lines=train_src,
+                normalized_lines=[],
             )
 
             target_index = None
+            exact_pair_keys = None
             if train_tgt is not None:
                 target_backend = _backend_manifest(manifest, "target_backend")
                 target_index = NgramInvertedIndex.from_native(
-                    lines=train_tgt,
                     native_index=_load_native_bytes(
                         _read_bytes_member(archive, TARGET_INDEX_NAME), "target"
                     ),
@@ -141,7 +157,10 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
                     sim_config=config.similarity,
                     index_config=config.index,
                     resolved_mode=str(target_backend["resolved_mode"]),
+                    lines=train_tgt,
+                    normalized_lines=[],
                 )
+                exact_pair_keys = _read_exact_pair_keys_member(archive)
     except zipfile.BadZipFile as exc:
         raise ConfigurationError("index bundle is not a valid zip file") from exc
 
@@ -150,6 +169,7 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
         train_tgt=train_tgt,
         source_index=source_index,
         target_index=target_index,
+        exact_pair_keys=exact_pair_keys,
         manifest=manifest,
     )
 
@@ -171,6 +191,7 @@ def _build_manifest(
     target_index: NgramInvertedIndex | None,
     source_index_bytes: bytes,
     target_index_bytes: bytes | None,
+    exact_pair_keys_bytes: bytes | None,
     config: ScoreConfig,
 ) -> dict[str, Any]:
     return {
@@ -193,10 +214,14 @@ def _build_manifest(
             "compression": "stored",
             "source_index_bytes": len(source_index_bytes),
             "target_index_bytes": len(target_index_bytes) if target_index_bytes is not None else 0,
+            "exact_pair_keys_bytes": (
+                len(exact_pair_keys_bytes) if exact_pair_keys_bytes is not None else 0
+            ),
         },
         "privacy": {
             "stores_raw_training_text": True,
             "stores_normalized_exact_match_keys": True,
+            "stores_normalized_pair_keys": exact_pair_keys_bytes is not None,
         },
     }
 
@@ -306,6 +331,13 @@ def _read_bytes_member(archive: zipfile.ZipFile, name: str) -> bytes:
         raise ConfigurationError(f"index bundle is missing {name}") from exc
 
 
+def _read_exact_pair_keys_member(archive: zipfile.ZipFile) -> set[str] | None:
+    try:
+        return _decode_exact_pair_keys(archive.read(EXACT_PAIR_KEYS_NAME))
+    except KeyError:
+        return None
+
+
 def _load_native_bytes(payload: bytes, label: str) -> Any:
     try:
         return native_index_from_bytes(payload)
@@ -327,6 +359,32 @@ def _encode_lines(lines: list[str]) -> bytes:
 
 def _decode_lines(payload: bytes) -> list[str]:
     return payload.decode("utf-8").splitlines()
+
+
+def _encode_exact_pair_keys(keys: set[str]) -> bytes:
+    payload = bytearray()
+    for key in keys:
+        encoded = key.encode("utf-8")
+        payload.extend(len(encoded).to_bytes(8, byteorder="little", signed=False))
+        payload.extend(encoded)
+    return bytes(payload)
+
+
+def _decode_exact_pair_keys(payload: bytes) -> set[str]:
+    keys: set[str] = set()
+    offset = 0
+    payload_len = len(payload)
+    while offset < payload_len:
+        if offset + 8 > payload_len:
+            raise ConfigurationError("index bundle exact-pair key member is truncated")
+        key_len = int.from_bytes(payload[offset : offset + 8], byteorder="little", signed=False)
+        offset += 8
+        end = offset + key_len
+        if end > payload_len:
+            raise ConfigurationError("index bundle exact-pair key member is truncated")
+        keys.add(payload[offset:end].decode("utf-8"))
+        offset = end
+    return keys
 
 
 def _jsonable(value: Any) -> Any:

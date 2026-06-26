@@ -162,6 +162,10 @@ impl NativeNgramIndex {
         self.postings.len()
     }
 
+    fn contains_exact(&self, query_norm: &str) -> bool {
+        self.exact_map.contains_key(query_norm)
+    }
+
     fn query_topk(&self, query_norm: &str, k: usize) -> Vec<NeighborTuple> {
         self.query_topk_impl(query_norm, k)
     }

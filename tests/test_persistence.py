@@ -22,8 +22,23 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     assert saved.source_index.query_topk("abcdeg", 2) == loaded.source_index.query_topk("abcdeg", 2)
     assert loaded.train_src == train_src
     assert loaded.train_tgt == train_tgt
+    assert loaded.source_index.normalized_lines == []
+    assert loaded.target_index is not None
+    assert loaded.target_index.normalized_lines == []
+    assert loaded.exact_pair_keys is not None
     assert manifest["format"] == "tameidx"
     assert manifest["privacy"]["stores_raw_training_text"] is True
+    assert manifest["privacy"]["stores_normalized_pair_keys"] is True
+
+    result = TameScorer(config).evaluate_index_bundle(
+        loaded,
+        test_src=["abcdef"],
+        refs=[["alpha"]],
+        hyp=["alpha"],
+    )
+    assert result.exposures[0].source_exact is True
+    assert result.exposures[0].target_exact is True
+    assert result.exposures[0].pair_exact is True
 
 
 def test_index_bundle_rejects_incompatible_backend_mode(tmp_path: Path) -> None:

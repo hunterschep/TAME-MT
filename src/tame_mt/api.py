@@ -162,6 +162,7 @@ class TameScorer:
             hyp=hyp,
             source_index=bundle.source_index,
             target_index=bundle.target_index,
+            exact_pair_keys=bundle.exact_pair_keys,
             index_reused=True,
         )
 
@@ -209,6 +210,7 @@ class TameScorer:
             hyp=hyp,
             source_index=None,
             target_index=None,
+            exact_pair_keys=None,
             index_reused=False,
         )
 
@@ -221,6 +223,7 @@ class TameScorer:
         hyp: list[str] | None,
         source_index: NgramInvertedIndex | None,
         target_index: NgramInvertedIndex | None,
+        exact_pair_keys: set[str] | None,
         index_reused: bool,
     ) -> EvaluationResult:
         exposure_result = compute_exposure_result(
@@ -231,6 +234,7 @@ class TameScorer:
             config=self.config,
             source_index=source_index,
             target_index=target_index,
+            exact_pair_keys=exact_pair_keys,
         )
         exposures = exposure_result.segments
         tm_hyp: list[str] = []
