@@ -37,6 +37,17 @@ jobs:
             --test-src {project}/tests/fixtures/test.src
             --ref {project}/tests/fixtures/test.ref
             --hyp {project}/tests/fixtures/hyp.out
+            --quiet &&
+            tame-mt index build
+            --train-src {project}/tests/fixtures/train.src
+            --train-tgt {project}/tests/fixtures/train.tgt
+            --out tame_fixture.tameidx
+            --quiet &&
+            tame-mt score
+            --index tame_fixture.tameidx
+            --test-src {project}/tests/fixtures/test.src
+            --ref {project}/tests/fixtures/test.ref
+            --hyp {project}/tests/fixtures/hyp.out
             --quiet
       - uses: actions/upload-artifact@v4
         with:
