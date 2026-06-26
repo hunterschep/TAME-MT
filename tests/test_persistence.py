@@ -1,3 +1,5 @@
+import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -65,3 +67,32 @@ def test_scorer_rejects_bundle_loaded_with_different_config(tmp_path: Path) -> N
     scorer = TameScorer(ScoreConfig(index=IndexConfig(mode="native_exact", topk=10)))
     with pytest.raises(ConfigurationError, match="retrieval settings"):
         scorer.evaluate_index_bundle(bundle, ["abcdef"], [["alpha"]], ["alpha"])
+
+
+def test_inspect_index_bundle_reports_invalid_utf8_manifest(tmp_path: Path) -> None:
+    path = tmp_path / "bad.tameidx"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", b"\xff")
+
+    with pytest.raises(ConfigurationError, match="manifest is not valid UTF-8"):
+        inspect_index_bundle(path)
+
+
+def test_load_index_bundle_reports_invalid_num_train_manifest(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(bad_path, "w") as target:
+        manifest = json.loads(source.read("manifest.json").decode("utf-8"))
+        manifest["num_train"] = "not-an-int"
+        for item in source.infolist():
+            if item.filename == "manifest.json":
+                target.writestr(item, json.dumps(manifest))
+            else:
+                target.writestr(item, source.read(item.filename))
+
+    with pytest.raises(ConfigurationError, match="num_train must be an integer"):
+        load_index_bundle(bad_path, config)

@@ -76,8 +76,8 @@ def validate_segment_artifacts(
 def _segment_exposure_from_payload(payload: dict[str, Any], line_number: int) -> SegmentExposure:
     try:
         return SegmentExposure(
-            index=int(payload["index"]),
-            source_exposure=float(payload["source_exposure"]),
+            index=_required_int(payload["index"]),
+            source_exposure=_required_float(payload["source_exposure"]),
             source_nn_index=_optional_int(payload.get("source_nn_index")),
             source_exact=_required_bool(payload["source_exact"]),
             target_exposure=_optional_float(payload.get("target_exposure")),
@@ -90,18 +90,23 @@ def _segment_exposure_from_payload(payload: dict[str, Any], line_number: int) ->
         )
     except KeyError as exc:
         raise InputDataError(f"segment JSONL line {line_number} is missing field {exc}") from exc
+    except InputDataError as exc:
+        raise InputDataError(f"segment JSONL line {line_number}: {exc}") from exc
 
 
 def _tm_result_from_payload(payload: dict[str, Any], line_number: int) -> SegmentTMResult:
     try:
+        tm_source_similarity = _optional_float(payload.get("tm_source_similarity"))
         return SegmentTMResult(
-            index=int(payload["index"]),
+            index=_required_int(payload["index"]),
             tm_hyp=str(payload.get("tm_hyp", "")),
             tm_source_index=_optional_int(payload.get("tm_source_index")),
-            tm_source_similarity=float(payload.get("tm_source_similarity") or 0.0),
+            tm_source_similarity=tm_source_similarity if tm_source_similarity is not None else 0.0,
         )
     except KeyError as exc:
         raise InputDataError(f"segment JSONL line {line_number} is missing field {exc}") from exc
+    except InputDataError as exc:
+        raise InputDataError(f"segment JSONL line {line_number}: {exc}") from exc
 
 
 def _unique_by_index(
@@ -125,6 +130,13 @@ def _preview_indices(indices: list[int]) -> str:
     return preview
 
 
+def _required_int(value: object) -> int:
+    parsed = _optional_int(value)
+    if parsed is None:
+        raise InputDataError("expected int-compatible value, got null")
+    return parsed
+
+
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
@@ -142,13 +154,23 @@ def _optional_int(value: object) -> int | None:
     raise InputDataError(f"expected int-compatible value, got {type(value).__name__}")
 
 
+def _required_float(value: object) -> float:
+    parsed = _optional_float(value)
+    if parsed is None:
+        raise InputDataError("expected float-compatible value, got null")
+    return parsed
+
+
 def _optional_float(value: object) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool):
         raise InputDataError("expected float-compatible value, got bool")
     if isinstance(value, str | int | float):
-        return float(value)
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise InputDataError(f"expected float-compatible value, got {value!r}") from exc
     raise InputDataError(f"expected float-compatible value, got {type(value).__name__}")
 
 

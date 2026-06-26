@@ -17,6 +17,8 @@
   persisting normalized exact-pair keys for faster repeated audits.
 - Hardened cached segment artifact scoring with strict index validation,
   canonical ordering, and safer JSON type parsing.
+- Improved malformed artifact and index-bundle errors so corrupt numeric fields,
+  manifests, and UTF-8 members fail with user-facing TAME-MT exceptions.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

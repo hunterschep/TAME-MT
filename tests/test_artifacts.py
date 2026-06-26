@@ -70,3 +70,33 @@ def test_read_segment_jsonl_rejects_non_bool_string(tmp_path: Path) -> None:
 
     with pytest.raises(InputDataError, match="expected bool-compatible"):
         read_segment_jsonl(path)
+
+
+def test_read_segment_jsonl_reports_invalid_required_float(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["source_exposure"] = "not-a-float"
+    _write_jsonl(path, [row])
+
+    with pytest.raises(InputDataError, match="line 1: expected float-compatible"):
+        read_segment_jsonl(path)
+
+
+def test_read_segment_jsonl_reports_invalid_optional_float(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["tm_source_similarity"] = "not-a-float"
+    _write_jsonl(path, [row])
+
+    with pytest.raises(InputDataError, match="line 1: expected float-compatible"):
+        read_segment_jsonl(path)
+
+
+def test_read_segment_jsonl_reports_invalid_required_index(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["index"] = None
+    _write_jsonl(path, [row])
+
+    with pytest.raises(InputDataError, match="line 1: expected int-compatible"):
+        read_segment_jsonl(path)

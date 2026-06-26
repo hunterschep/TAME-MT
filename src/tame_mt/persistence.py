@@ -125,7 +125,7 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
                 if bool(manifest.get("has_target"))
                 else None
             )
-            if int(manifest.get("num_train", -1)) != len(train_src):
+            if _manifest_int(manifest, "num_train") != len(train_src):
                 raise ConfigurationError(
                     "index bundle manifest does not match stored train.src line count"
                 )
@@ -237,6 +237,8 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
         payload = archive.read(MANIFEST_NAME).decode("utf-8")
     except KeyError as exc:
         raise ConfigurationError("index bundle is missing manifest.json") from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError("index bundle manifest is not valid UTF-8") from exc
     try:
         manifest = json.loads(payload)
     except json.JSONDecodeError as exc:
@@ -280,6 +282,18 @@ def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
     _validate_build_settings(saved_index, config, source_backend)
 
 
+def _manifest_int(manifest: dict[str, Any], key: str) -> int:
+    value = manifest.get(key)
+    if value is None:
+        raise ConfigurationError(f"index bundle manifest field {key} must be an integer")
+    if isinstance(value, bool):
+        raise ConfigurationError(f"index bundle manifest field {key} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"index bundle manifest field {key} must be an integer") from exc
+
+
 def _validate_requested_backend(backend: dict[str, Any], config: ScoreConfig) -> None:
     resolved_mode = str(backend.get("resolved_mode"))
     if not resolved_mode.startswith("native_"):
@@ -319,7 +333,7 @@ def _backend_manifest(manifest: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _read_lines_member(archive: zipfile.ZipFile, name: str) -> list[str]:
     try:
-        return _decode_lines(archive.read(name))
+        return _decode_lines(archive.read(name), name)
     except KeyError as exc:
         raise ConfigurationError(f"index bundle is missing {name}") from exc
 
@@ -336,6 +350,8 @@ def _read_exact_pair_keys_member(archive: zipfile.ZipFile) -> set[str] | None:
         return _decode_exact_pair_keys(archive.read(EXACT_PAIR_KEYS_NAME))
     except KeyError:
         return None
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError("index bundle exact-pair key member is not valid UTF-8") from exc
 
 
 def _load_native_bytes(payload: bytes, label: str) -> Any:
@@ -357,8 +373,11 @@ def _encode_lines(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _decode_lines(payload: bytes) -> list[str]:
-    return payload.decode("utf-8").splitlines()
+def _decode_lines(payload: bytes, member_name: str) -> list[str]:
+    try:
+        return payload.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(f"index bundle member {member_name} is not valid UTF-8") from exc
 
 
 def _encode_exact_pair_keys(keys: set[str]) -> bytes:
