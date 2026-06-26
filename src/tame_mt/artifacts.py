@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from tame_mt.exceptions import InputDataError
+from tame_mt.io import open_text
 from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 SegmentRow = TypeVar("SegmentRow", SegmentExposure, SegmentTMResult)
@@ -15,7 +16,7 @@ def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[Se
     tm_results: list[SegmentTMResult] = []
     input_path = Path(path)
     try:
-        with input_path.open("r", encoding="utf-8") as handle:
+        with open_text(input_path, "r") as handle:
             for line_number, line in enumerate(handle, start=1):
                 if not line.strip():
                     continue

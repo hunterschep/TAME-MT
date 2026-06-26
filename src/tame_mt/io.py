@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import gzip
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal, TextIO, cast
 
 from tame_mt.exceptions import AlignmentError, InputDataError
+
+TextMode = Literal["r", "w"]
 
 
 def read_lines(path: str | Path) -> list[str]:
     input_path = Path(path)
     try:
-        with input_path.open("r", encoding="utf-8") as handle:
+        with open_text(input_path, "r") as handle:
             return [line.rstrip("\n\r") for line in handle]
     except UnicodeDecodeError as exc:
         raise InputDataError(f"{input_path} is not valid UTF-8 text") from exc
@@ -18,9 +23,20 @@ def read_lines(path: str | Path) -> list[str]:
 def write_lines(path: str | Path, lines: list[str]) -> None:
     output_path = Path(path)
     ensure_parent_dir(output_path)
-    with output_path.open("w", encoding="utf-8") as handle:
+    with open_text(output_path, "w") as handle:
         for line in lines:
             handle.write(f"{line}\n")
+
+
+@contextmanager
+def open_text(path: str | Path, mode: TextMode) -> Iterator[TextIO]:
+    text_path = Path(path)
+    if text_path.suffix == ".gz":
+        with gzip.open(text_path, f"{mode}t", encoding="utf-8") as handle:
+            yield cast(TextIO, handle)
+    else:
+        with text_path.open(mode, encoding="utf-8") as handle:
+            yield handle
 
 
 def ensure_parent_dir(path: str | Path) -> None:

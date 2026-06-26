@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from tame_mt.config import ScoreConfig
-from tame_mt.io import ensure_parent_dir
+from tame_mt.io import ensure_parent_dir, open_text
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.version import __version__
 
@@ -94,7 +94,7 @@ def _render_backend(report: TameReport) -> list[str]:
 def write_json_report(path: str | Path, report: TameReport) -> None:
     output_path = Path(path)
     ensure_parent_dir(output_path)
-    with output_path.open("w", encoding="utf-8") as handle:
+    with open_text(output_path, "w") as handle:
         json.dump(report.to_dict(), handle, ensure_ascii=False, indent=2)
         handle.write("\n")
 
@@ -116,7 +116,7 @@ def write_segment_jsonl(
     tm_by_index = {result.index: result for result in tm_results}
     output_path = Path(path)
     ensure_parent_dir(output_path)
-    with output_path.open("w", encoding="utf-8") as handle:
+    with open_text(output_path, "w") as handle:
         for segment in exposures:
             tm_result = tm_by_index.get(segment.index)
             payload: dict[str, Any] = {

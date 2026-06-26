@@ -29,6 +29,9 @@
 - Tightened API and cached-scoring validation for empty references and
   non-positive training counts.
 - Removed an unused experimental weighted-BLEU helper from the package surface.
+- Added transparent `.gz` support for corpus inputs and text/JSONL/JSON outputs.
+- Extended the synthetic benchmark with staged index-build, indexed-audit, and
+  cached-scoring timings.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

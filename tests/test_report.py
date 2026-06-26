@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from tame_mt import TameScorer
+from tame_mt.artifacts import read_segment_jsonl
 from tame_mt.report import write_segment_jsonl
 
 
@@ -45,3 +46,30 @@ def test_segment_jsonl_multi_ref_texts_are_explicit(tmp_path: Path) -> None:
     )
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["reference_texts"] == ["hola mundo", "saludos mundo"]
+
+
+def test_segment_jsonl_supports_gzip(tmp_path: Path) -> None:
+    scorer = TameScorer()
+    result = scorer.evaluate_corpus(
+        train_src=["hello world"],
+        train_tgt=["hola mundo"],
+        test_src=["hello world"],
+        refs=[["hola mundo"]],
+        hyp=["hola mundo"],
+    )
+    out = tmp_path / "segments.jsonl.gz"
+    write_segment_jsonl(
+        out,
+        result.exposures,
+        result.tm_results,
+        train_src=["hello world"],
+        train_tgt=["hola mundo"],
+        test_src=["hello world"],
+        refs=[["hola mundo"]],
+        hyp=["hola mundo"],
+    )
+
+    exposures, tm_results = read_segment_jsonl(out)
+
+    assert len(exposures) == 1
+    assert tm_results[0].tm_hyp == "hola mundo"

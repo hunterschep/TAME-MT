@@ -120,6 +120,9 @@ Raw text fields are opt-in:
 --include-neighbor-text
 ```
 
+Use `.json.gz` or `.jsonl.gz` output paths to write gzip-compressed UTF-8 JSON
+reports or segment diagnostics.
+
 Consumers should treat `index` as the authoritative original segment position.
 `score-cached` requires indices to be unique and contiguous from `0` to `N-1`
 and sorts valid rows by index before scoring. `--num-train` must be the positive

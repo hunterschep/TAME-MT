@@ -12,6 +12,13 @@ def test_read_and_write_lines_preserve_empty_segments(tmp_path: Path) -> None:
     assert read_lines(out) == ["a", "", "b"]
 
 
+def test_read_and_write_lines_support_gzip(tmp_path: Path) -> None:
+    out = tmp_path / "nested" / "lines.txt.gz"
+    write_lines(out, ["a", "", "b"])
+
+    assert read_lines(out) == ["a", "", "b"]
+
+
 def test_read_lines_rejects_invalid_utf8(tmp_path: Path) -> None:
     path = tmp_path / "bad.txt"
     path.write_bytes(b"\xff")

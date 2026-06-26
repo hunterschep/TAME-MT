@@ -448,6 +448,11 @@ safe to write the data:
 
 `--include-neighbor-text` may write raw training text.
 
+Plain UTF-8 text files and gzip-compressed files ending in `.gz` are supported
+for corpus inputs and text/JSONL/JSON outputs. This lets large benchmarks keep
+`train.src.gz`, `segments.jsonl.gz`, or `system.tame.json.gz` compressed without
+changing the command shape.
+
 ## Python API
 
 ```python

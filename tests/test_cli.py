@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from tame_mt.cli import main
+from tame_mt.io import read_lines, write_lines
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -41,6 +42,50 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
     segment_lines = segment_out.read_text(encoding="utf-8").splitlines()
     assert len(segment_lines) == 4
     assert json.loads(segment_lines[0])["source_exact"] is True
+
+
+def test_cli_score_supports_gzip_text_inputs_and_outputs(tmp_path: Path) -> None:
+    train_src = tmp_path / "train.src.gz"
+    train_tgt = tmp_path / "train.tgt.gz"
+    test_src = tmp_path / "test.src.gz"
+    ref = tmp_path / "test.ref.gz"
+    hyp = tmp_path / "hyp.out.gz"
+    json_out = tmp_path / "report.json.gz"
+    segment_out = tmp_path / "segments.jsonl.gz"
+    for source, target in [
+        (FIXTURES / "train.src", train_src),
+        (FIXTURES / "train.tgt", train_tgt),
+        (FIXTURES / "test.src", test_src),
+        (FIXTURES / "test.ref", ref),
+        (FIXTURES / "hyp.out", hyp),
+    ]:
+        write_lines(target, read_lines(source))
+
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(train_src),
+            "--train-tgt",
+            str(train_tgt),
+            "--test-src",
+            str(test_src),
+            "--ref",
+            str(ref),
+            "--hyp",
+            str(hyp),
+            "--json-out",
+            str(json_out),
+            "--segment-out",
+            str(segment_out),
+            "--quiet",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads("\n".join(read_lines(json_out)))
+    assert payload["data"]["num_test"] == 4
+    assert len(read_lines(segment_out)) == 4
 
 
 def test_cli_doctor_reports_environment(capsys) -> None:

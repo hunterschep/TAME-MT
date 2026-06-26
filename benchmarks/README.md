@@ -8,6 +8,12 @@ Run the synthetic benchmark:
 python benchmarks/bench_synthetic.py --small --assert-thresholds
 ```
 
+Run the production-style staged benchmark:
+
+```bash
+python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
+```
+
 Run a larger local check:
 
 ```bash
