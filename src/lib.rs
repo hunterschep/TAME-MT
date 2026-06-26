@@ -216,9 +216,102 @@ impl NativeNgramIndex {
         }
         Ok(scores)
     }
+
+    fn best_pair_candidate(
+        &self,
+        target_index: PyRef<'_, NativeNgramIndex>,
+        source_query_norm: &str,
+        target_query_norms: Vec<String>,
+        candidate_indices: Vec<usize>,
+    ) -> PyResult<NeighborTuple> {
+        self.best_pair_candidate_impl(
+            &target_index,
+            source_query_norm,
+            &target_query_norms,
+            &candidate_indices,
+        )
+    }
+
+    fn batch_best_pair_candidates(
+        &self,
+        target_index: PyRef<'_, NativeNgramIndex>,
+        source_query_norms: Vec<String>,
+        target_query_norms_by_segment: Vec<Vec<String>>,
+        candidate_indices_by_segment: Vec<Vec<usize>>,
+    ) -> PyResult<Vec<NeighborTuple>> {
+        if source_query_norms.len() != target_query_norms_by_segment.len()
+            || source_query_norms.len() != candidate_indices_by_segment.len()
+        {
+            return Err(PyValueError::new_err(
+                "source queries, target queries, and candidate lists must have the same length",
+            ));
+        }
+        let mut results = Vec::with_capacity(source_query_norms.len());
+        for ((source_query_norm, target_query_norms), candidate_indices) in source_query_norms
+            .iter()
+            .zip(target_query_norms_by_segment.iter())
+            .zip(candidate_indices_by_segment.iter())
+        {
+            results.push(self.best_pair_candidate_impl(
+                &target_index,
+                source_query_norm,
+                target_query_norms,
+                candidate_indices,
+            )?);
+        }
+        Ok(results)
+    }
 }
 
 impl NativeNgramIndex {
+    fn best_pair_candidate_impl(
+        &self,
+        target_index: &NativeNgramIndex,
+        source_query_norm: &str,
+        target_query_norms: &[String],
+        candidate_indices: &[usize],
+    ) -> PyResult<NeighborTuple> {
+        if candidate_indices.is_empty() {
+            return Ok((None, 0.0, false));
+        }
+        let mut sorted_candidates = candidate_indices.to_vec();
+        sorted_candidates.sort_unstable();
+        sorted_candidates.dedup();
+
+        let source_grams = char_ngrams(source_query_norm, &self.ngram_orders);
+        let (source_count, source_ids) = self.query_gram_ids_from_grams(source_grams);
+        let target_queries: Vec<(usize, Vec<GramId>)> = target_query_norms
+            .iter()
+            .map(|query| {
+                target_index
+                    .query_gram_ids_from_grams(char_ngrams(query, &target_index.ngram_orders))
+            })
+            .collect();
+
+        let mut best_index: Option<usize> = None;
+        let mut best_score = 0.0_f64;
+        for index in sorted_candidates {
+            if index >= self.gram_sets.len() || index >= target_index.gram_sets.len() {
+                return Err(PyIndexError::new_err(format!(
+                    "candidate index out of range: {index}"
+                )));
+            }
+            let source_score = jaccard_ids(source_count, &source_ids, &self.gram_sets[index]);
+            let target_score = target_queries
+                .iter()
+                .map(|(target_count, target_ids)| {
+                    jaccard_ids(*target_count, target_ids, &target_index.gram_sets[index])
+                })
+                .fold(0.0_f64, f64::max);
+            let pair_score = source_score.min(target_score);
+            if pair_score > best_score {
+                best_index = Some(index);
+                best_score = pair_score;
+            }
+        }
+        Ok((best_index, best_score, best_score == 1.0))
+    }
+
     fn serialize_index(&self) -> PyResult<Vec<u8>> {
         bincode::serialize(self).map_err(|exc| {
             PyValueError::new_err(format!("failed to serialize native index: {exc}"))

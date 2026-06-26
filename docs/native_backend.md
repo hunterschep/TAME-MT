@@ -52,10 +52,13 @@ Corpus-level batch queries release the Python GIL and use Rayon for parallel
 query execution inside Rust. Python still owns file IO, SacreBLEU scoring, JSON
 serialization, and report formatting.
 
-Pair exposure uses bulk candidate scoring: each source/reference query is
-featurized once, then scored against the candidate ID set. This avoids the
-per-candidate n-gram regeneration that makes pure Python nearest-neighbor loops
-slow at corpus scale.
+Pair exposure uses native pair reranking when both source and target indexes are
+native. Python builds deterministic candidate ID lists from source and target
+top-k results, then Rust scores each source/reference query against the shared
+candidate set and returns the best paired neighbor. The corpus path batches
+those pair reranks through one native call, which reduces Python/Rust boundary
+overhead at large test sizes. Pure-Python indexes use the same scoring
+semantics through a fallback path.
 
 ## Persistent Indexes
 

@@ -353,6 +353,53 @@ class NgramInvertedIndex:
             scores[index] = jaccard(query_grams, self.gram_sets[index])
         return scores
 
+    def best_pair_candidate(
+        self,
+        target_index: NgramInvertedIndex,
+        source_text: str,
+        ref_texts: list[str],
+        indices: list[int],
+    ) -> NeighborResult | None:
+        if self._native_index is None or target_index._native_index is None:
+            return None
+        source_norm = normalize_text(source_text, self.norm_config)
+        target_norms = [normalize_text(ref, target_index.norm_config) for ref in ref_texts]
+        item = self._native_index.best_pair_candidate(
+            target_index._native_index,
+            source_norm,
+            target_norms,
+            indices,
+        )
+        return NeighborResult(index=item[0], score=float(item[1]), exact=bool(item[2]))
+
+    def batch_best_pair_candidates(
+        self,
+        target_index: NgramInvertedIndex,
+        source_texts: list[str],
+        ref_texts_by_segment: list[list[str]],
+        candidate_indices_by_segment: list[list[int]],
+    ) -> list[NeighborResult] | None:
+        if self._native_index is None or target_index._native_index is None:
+            return None
+        source_norms = [normalize_text(text, self.norm_config) for text in source_texts]
+        target_norms_by_segment = [
+            [normalize_text(ref, target_index.norm_config) for ref in ref_texts]
+            for ref_texts in ref_texts_by_segment
+        ]
+        native_rows = self._native_index.batch_best_pair_candidates(
+            target_index._native_index,
+            source_norms,
+            target_norms_by_segment,
+            candidate_indices_by_segment,
+        )
+        return [
+            NeighborResult(index=item[0], score=float(item[1]), exact=bool(item[2]))
+            for item in native_rows
+        ]
+
+    def supports_native_pair_candidates(self, target_index: NgramInvertedIndex) -> bool:
+        return self._native_index is not None and target_index._native_index is not None
+
     def contains_exact_normalized(self, normalized_text: str) -> bool:
         if self._native_index is not None:
             return bool(self._native_index.contains_exact(normalized_text))

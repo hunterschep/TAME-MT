@@ -64,6 +64,20 @@ def compute_exposure_result(
         if target_index is not None and refs is not None
         else []
     )
+    pair_neighbors_by_segment = (
+        _batch_pair_neighbors(
+            test_src=test_src,
+            refs=refs,
+            source_tops_by_segment=source_tops_by_segment,
+            target_tops_by_ref=target_tops_by_ref,
+            source_index=source_index,
+            target_index=target_index,
+        )
+        if target_index is not None
+        and refs is not None
+        and source_index.supports_native_pair_candidates(target_index)
+        else None
+    )
 
     exposures: list[SegmentExposure] = []
     for idx, source_text in enumerate(test_src):
@@ -93,7 +107,9 @@ def compute_exposure_result(
             else None
         )
         pair_nn = (
-            _compute_pair_neighbor(
+            pair_neighbors_by_segment[idx]
+            if pair_neighbors_by_segment is not None
+            else _compute_pair_neighbor(
                 source_text=source_text,
                 ref_texts=ref_texts,
                 source_top=source_top,
@@ -244,8 +260,17 @@ def _compute_pair_neighbor(
     for top_results in target_tops:
         candidates.update(_candidate_indices(top_results))
 
-    best = NeighborResult(index=None, score=0.0, exact=False)
     sorted_candidates = sorted(candidates)
+    native_best = source_index.best_pair_candidate(
+        target_index,
+        source_text,
+        ref_texts,
+        sorted_candidates,
+    )
+    if native_best is not None:
+        return native_best
+
+    best = NeighborResult(index=None, score=0.0, exact=False)
     source_scores = source_index.score_candidates(source_text, sorted_candidates)
     target_scores_by_ref = [
         target_index.score_candidates(ref, sorted_candidates) for ref in ref_texts
@@ -257,6 +282,29 @@ def _compute_pair_neighbor(
         if pair_sim > best.score:
             best = NeighborResult(index=candidate, score=pair_sim, exact=pair_sim == 1.0)
     return best
+
+
+def _batch_pair_neighbors(
+    test_src: list[str],
+    refs: list[list[str]],
+    source_tops_by_segment: list[list[NeighborResult]],
+    target_tops_by_ref: list[list[list[NeighborResult]]],
+    source_index: NgramInvertedIndex,
+    target_index: NgramInvertedIndex,
+) -> list[NeighborResult] | None:
+    ref_texts_by_segment = [[ref[idx] for ref in refs] for idx in range(len(test_src))]
+    candidate_indices_by_segment: list[list[int]] = []
+    for idx, source_top in enumerate(source_tops_by_segment):
+        candidates = _candidate_indices(source_top)
+        for tops_by_ref in target_tops_by_ref:
+            candidates.update(_candidate_indices(tops_by_ref[idx]))
+        candidate_indices_by_segment.append(sorted(candidates))
+    return source_index.batch_best_pair_candidates(
+        target_index,
+        test_src,
+        ref_texts_by_segment,
+        candidate_indices_by_segment,
+    )
 
 
 def _candidate_indices(results: Iterable[NeighborResult]) -> set[int]:

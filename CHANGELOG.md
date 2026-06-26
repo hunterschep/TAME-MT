@@ -19,6 +19,11 @@
   canonical ordering, and safer JSON type parsing.
 - Improved malformed artifact and index-bundle errors so corrupt numeric fields,
   manifests, and UTF-8 members fail with user-facing TAME-MT exceptions.
+- Optimized cached and repeated scoring by aggregating SacreBLEU segment
+  statistics once per metric/system instead of rescoring every exposure bin
+  separately.
+- Moved native pair-exposure reranking into a batched Rust path to reduce
+  Python/Rust boundary overhead in large indexed audits.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

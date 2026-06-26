@@ -49,15 +49,27 @@ tame-mt score \
   --json-out /tmp/tame_index_report.json \
   --quiet
 
+tame-mt score-cached \
+  --segment-in /tmp/tame_segments.jsonl \
+  --ref tests/fixtures/test.ref \
+  --hyp tests/fixtures/hyp.out \
+  --num-train 4 \
+  --json-out /tmp/tame_cached_report.json \
+  --quiet
+
 python - <<'PY'
 import json
 from pathlib import Path
 
 fresh = json.loads(Path("/tmp/tame_report.json").read_text(encoding="utf-8"))
 indexed = json.loads(Path("/tmp/tame_index_report.json").read_text(encoding="utf-8"))
+cached = json.loads(Path("/tmp/tame_cached_report.json").read_text(encoding="utf-8"))
 assert fresh["quality"] == indexed["quality"]
 assert fresh["exposure"] == indexed["exposure"]
 assert indexed["backend"]["index_reused"] is True
+assert fresh["quality"] == cached["quality"]
+assert fresh["exposure"] == cached["exposure"]
+assert cached["backend"]["resolved_mode"] == "cached_segments"
 PY
 
 python examples/public_corpora_demo/run_opus100_demo.py \

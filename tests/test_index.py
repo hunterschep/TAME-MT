@@ -141,3 +141,66 @@ def test_native_contains_exact_without_python_exact_map_when_available() -> None
     assert index.contains_exact_normalized("hello world") is True
     assert index.contains_exact_normalized("goodbye") is False
     assert index.score_candidate("hello world", 0) == 1.0
+
+
+def test_native_best_pair_candidate_matches_separate_candidate_scores() -> None:
+    pytest.importorskip("tame_mt._native")
+    index_config = IndexConfig(mode="native_exact")
+    source_index = NgramInvertedIndex.build(
+        ["abcdef", "abcxyz", "uvwxyz"],
+        index_config=index_config,
+    )
+    target_index = NgramInvertedIndex.build(
+        ["klmnop", "klmxyz", "qrstuv"],
+        index_config=index_config,
+    )
+    candidates = [2, 1, 0]
+    source_text = "abcdeg"
+    refs = ["klmxyy"]
+
+    source_scores = source_index.score_candidates(source_text, candidates)
+    target_scores = target_index.score_candidates(refs[0], candidates)
+    expected_index, expected_score = max(
+        ((index, min(source_scores[index], target_scores[index])) for index in sorted(candidates)),
+        key=lambda item: (item[1], -item[0]),
+    )
+
+    result = source_index.best_pair_candidate(target_index, source_text, refs, candidates)
+
+    assert result is not None
+    assert result.index == expected_index
+    assert result.score == expected_score
+
+
+def test_native_batch_best_pair_candidates_matches_single_calls() -> None:
+    pytest.importorskip("tame_mt._native")
+    index_config = IndexConfig(mode="native_exact")
+    source_index = NgramInvertedIndex.build(
+        ["abcdef", "abcxyz", "uvwxyz"],
+        index_config=index_config,
+    )
+    target_index = NgramInvertedIndex.build(
+        ["klmnop", "klmxyz", "qrstuv"],
+        index_config=index_config,
+    )
+    source_texts = ["abcdeg", "uvwxyy"]
+    refs_by_segment = [["klmxyy"], ["qrstuv"]]
+    candidate_lists = [[2, 1, 0], [0, 2]]
+
+    batch_results = source_index.batch_best_pair_candidates(
+        target_index,
+        source_texts,
+        refs_by_segment,
+        candidate_lists,
+    )
+    single_results = [
+        source_index.best_pair_candidate(target_index, source, refs, candidates)
+        for source, refs, candidates in zip(
+            source_texts,
+            refs_by_segment,
+            candidate_lists,
+            strict=True,
+        )
+    ]
+
+    assert batch_results == single_results

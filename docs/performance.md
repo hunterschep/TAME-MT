@@ -87,9 +87,17 @@ and 2,000 test pairs completed as follows:
 | OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
 | OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
 | OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
+| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~4.2s |
+| Synthetic 100k train / 2k test, one-time index build | `native_fast` | ~4.0s |
+| Synthetic 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~1.0s |
+| Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.6s |
 
 These numbers are smoke timings, not universal performance claims. Report the
 machine, corpus size, backend, and full TAME-MT signature for benchmark tables.
 The OPUS-100 100k source+target `.tameidx` bundle was about 383 MB because
 bundles are currently stored uncompressed to favor load speed.
+
+The cached path still runs SacreBLEU/chrF over system and TM outputs, but it no
+longer touches the training corpus. TAME-MT aggregates SacreBLEU segment
+statistics once per metric and output, then reuses those statistics for the
+whole corpus and all exposure bins.

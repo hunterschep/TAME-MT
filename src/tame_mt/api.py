@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from tame_mt.artifacts import validate_segment_artifacts
-from tame_mt.bins import compute_generalization_gap, score_bins
+from tame_mt.bins import compute_generalization_gap, score_corpus_and_bins
 from tame_mt.config import ScoreConfig
 from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.exposure import compute_exposure_result, summarize_exposures
@@ -12,7 +12,7 @@ from tame_mt.io import read_lines, validate_corpus_inputs, validate_equal_length
 from tame_mt.persistence import IndexBundle
 from tame_mt.report import build_signature, config_to_dict
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
-from tame_mt.scoring import delta_scores, score_metrics
+from tame_mt.scoring import delta_scores
 from tame_mt.tm import build_tm_hypotheses
 from tame_mt.version import __version__
 from tame_mt.warnings import generate_warnings
@@ -96,10 +96,11 @@ class TameScorer:
         validate_equal_lengths("segments", exposures, "hyp", hyp)
         validate_equal_lengths("segments", exposures, "tm_hyp", tm_hyp)
 
-        system_scores: dict[str, float | None] = score_metrics(hyp, refs, self.config)
-        tm_scores: dict[str, float | None] = score_metrics(tm_hyp, refs, self.config)
+        scored_bins = score_corpus_and_bins(hyp, tm_hyp, refs, exposures, self.config)
+        system_scores = scored_bins.system_scores
+        tm_scores = scored_bins.tm_scores
         deltas = delta_scores(system_scores, tm_scores, self.config.metrics)
-        bin_reports = score_bins(hyp, tm_hyp, refs, exposures, self.config)
+        bin_reports = scored_bins.bin_reports
         gen_gap = compute_generalization_gap(bin_reports, self.config.metrics)
         exposure_summary = summarize_exposures(exposures, self.config)
         warnings = generate_warnings(
@@ -243,22 +244,21 @@ class TameScorer:
         if train_tgt is not None:
             tm_hyp, tm_results = build_tm_hypotheses(train_tgt, exposures, self.config)
 
-        system_scores: dict[str, float | None] = (
-            score_metrics(hyp, refs, self.config)
-            if hyp is not None and refs is not None
-            else _empty_metric_scores(self.config)
+        scored_bins = score_corpus_and_bins(
+            hyp,
+            tm_hyp if tm_hyp else None,
+            refs,
+            exposures,
+            self.config,
         )
-        tm_scores: dict[str, float | None] = (
-            score_metrics(tm_hyp, refs, self.config)
-            if tm_hyp and refs is not None
-            else _empty_metric_scores(self.config)
-        )
+        system_scores = scored_bins.system_scores
+        tm_scores = scored_bins.tm_scores
         deltas: dict[str, float | None] = (
             delta_scores(system_scores, tm_scores, self.config.metrics)
             if hyp is not None
             else _empty_metric_scores(self.config)
         )
-        bin_reports = score_bins(hyp, tm_hyp if tm_hyp else None, refs, exposures, self.config)
+        bin_reports = scored_bins.bin_reports
         gen_gap = compute_generalization_gap(bin_reports, self.config.metrics)
         exposure_summary = summarize_exposures(exposures, self.config)
         warnings = generate_warnings(
