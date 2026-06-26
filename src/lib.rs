@@ -4,18 +4,47 @@ use pyo3::types::PyBytes;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 type NeighborTuple = (Option<usize>, f64, bool);
 type GramId = u32;
 type DocId = u32;
+type GramToIdMap = HashMap<Vec<u8>, GramId, BuildHasherDefault<FnvHasher>>;
+
+const FNV_OFFSET_BASIS_64: u64 = 0xcbf29ce484222325;
+const FNV_PRIME_64: u64 = 0x00000100000001b3;
+
+struct FnvHasher {
+    hash: u64,
+}
+
+impl Default for FnvHasher {
+    fn default() -> Self {
+        Self {
+            hash: FNV_OFFSET_BASIS_64,
+        }
+    }
+}
+
+impl Hasher for FnvHasher {
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.hash ^= u64::from(*byte);
+            self.hash = self.hash.wrapping_mul(FNV_PRIME_64);
+        }
+    }
+}
 
 #[pyclass]
 #[derive(Serialize, Deserialize)]
 struct NativeNgramIndex {
     gram_sets: Vec<Vec<GramId>>,
-    gram_counts: Vec<usize>,
     postings: Vec<Vec<DocId>>,
-    gram_to_id: HashMap<String, GramId>,
+    gram_to_id: GramToIdMap,
     exact_map: HashMap<String, usize>,
     ngram_orders: Vec<usize>,
     mode: String,
@@ -73,17 +102,16 @@ impl NativeNgramIndex {
         }
 
         let mut gram_sets: Vec<Vec<GramId>> = Vec::with_capacity(normalized_lines.len());
-        let mut gram_counts: Vec<usize> = Vec::with_capacity(normalized_lines.len());
         let mut postings: Vec<Vec<DocId>> = Vec::new();
-        let mut gram_to_id: HashMap<String, GramId> = HashMap::new();
+        let mut gram_to_id = GramToIdMap::default();
         let mut exact_map: HashMap<String, usize> = HashMap::new();
 
         for (idx, line) in normalized_lines.iter().enumerate() {
             exact_map.entry(line.clone()).or_insert(idx);
-            let grams = char_ngrams(line, &ngram_orders);
+            let grams = char_ngram_slices(line, &ngram_orders);
             let mut doc_grams: Vec<GramId> = Vec::with_capacity(grams.len());
             for gram in grams {
-                let gram_id = if let Some(gram_id) = gram_to_id.get(&gram) {
+                let gram_id = if let Some(gram_id) = gram_to_id.get(gram) {
                     *gram_id
                 } else {
                     let next_id = postings.len();
@@ -94,15 +122,17 @@ impl NativeNgramIndex {
                         )));
                     }
                     let gram_id = next_id as GramId;
-                    gram_to_id.insert(gram, gram_id);
+                    gram_to_id.insert(gram.to_vec(), gram_id);
                     postings.push(Vec::new());
                     gram_id
                 };
                 doc_grams.push(gram_id);
-                postings[gram_id as usize].push(idx as DocId);
             }
             doc_grams.sort_unstable();
-            gram_counts.push(doc_grams.len());
+            doc_grams.dedup();
+            for gram_id in &doc_grams {
+                postings[*gram_id as usize].push(idx as DocId);
+            }
             gram_sets.push(doc_grams);
         }
 
@@ -112,7 +142,6 @@ impl NativeNgramIndex {
 
         Ok(Self {
             gram_sets,
-            gram_counts,
             postings,
             gram_to_id,
             exact_map,
@@ -190,7 +219,7 @@ impl NativeNgramIndex {
                 "candidate index out of range: {index}"
             )));
         }
-        let query_grams = char_ngrams(query_norm, &self.ngram_orders);
+        let query_grams = char_ngram_slices(query_norm, &self.ngram_orders);
         let (query_count, query_ids) = self.query_gram_ids_from_grams(query_grams);
         Ok(jaccard_ids(query_count, &query_ids, &self.gram_sets[index]))
     }
@@ -200,7 +229,7 @@ impl NativeNgramIndex {
         query_norm: &str,
         indices: Vec<usize>,
     ) -> PyResult<Vec<(usize, f64)>> {
-        let query_grams = char_ngrams(query_norm, &self.ngram_orders);
+        let query_grams = char_ngram_slices(query_norm, &self.ngram_orders);
         let (query_count, query_ids) = self.query_gram_ids_from_grams(query_grams);
         let mut scores = Vec::with_capacity(indices.len());
         for index in indices {
@@ -234,6 +263,7 @@ impl NativeNgramIndex {
 
     fn batch_best_pair_candidates(
         &self,
+        py: Python<'_>,
         target_index: PyRef<'_, NativeNgramIndex>,
         source_query_norms: Vec<String>,
         target_query_norms_by_segment: Vec<Vec<String>>,
@@ -246,20 +276,24 @@ impl NativeNgramIndex {
                 "source queries, target queries, and candidate lists must have the same length",
             ));
         }
-        let mut results = Vec::with_capacity(source_query_norms.len());
-        for ((source_query_norm, target_query_norms), candidate_indices) in source_query_norms
-            .iter()
-            .zip(target_query_norms_by_segment.iter())
-            .zip(candidate_indices_by_segment.iter())
-        {
-            results.push(self.best_pair_candidate_impl(
-                &target_index,
-                source_query_norm,
-                target_query_norms,
-                candidate_indices,
-            )?);
-        }
-        Ok(results)
+        let target_index_ref: &NativeNgramIndex = &target_index;
+        py.allow_threads(|| {
+            source_query_norms
+                .par_iter()
+                .zip(target_query_norms_by_segment.par_iter())
+                .zip(candidate_indices_by_segment.par_iter())
+                .map(
+                    |((source_query_norm, target_query_norms), candidate_indices)| {
+                        self.best_pair_candidate_impl(
+                            target_index_ref,
+                            source_query_norm,
+                            target_query_norms,
+                            candidate_indices,
+                        )
+                    },
+                )
+                .collect()
+        })
     }
 }
 
@@ -278,13 +312,13 @@ impl NativeNgramIndex {
         sorted_candidates.sort_unstable();
         sorted_candidates.dedup();
 
-        let source_grams = char_ngrams(source_query_norm, &self.ngram_orders);
+        let source_grams = char_ngram_slices(source_query_norm, &self.ngram_orders);
         let (source_count, source_ids) = self.query_gram_ids_from_grams(source_grams);
         let target_queries: Vec<(usize, Vec<GramId>)> = target_query_norms
             .iter()
             .map(|query| {
                 target_index
-                    .query_gram_ids_from_grams(char_ngrams(query, &target_index.ngram_orders))
+                    .query_gram_ids_from_grams(char_ngram_slices(query, &target_index.ngram_orders))
             })
             .collect();
 
@@ -327,7 +361,7 @@ impl NativeNgramIndex {
             return vec![(Some(*index), 1.0, true)];
         }
 
-        let query_grams = char_ngrams(query_norm, &self.ngram_orders);
+        let query_grams = char_ngram_slices(query_norm, &self.ngram_orders);
         let (query_count, query_ids) = self.query_gram_ids_from_grams(query_grams);
         if query_count == 0 || query_ids.is_empty() {
             return Vec::new();
@@ -341,11 +375,11 @@ impl NativeNgramIndex {
         self.rank_candidates(query_count, &query_ids, intersection_counts, k)
     }
 
-    fn query_gram_ids_from_grams(&self, grams: Vec<String>) -> (usize, Vec<GramId>) {
+    fn query_gram_ids_from_grams(&self, grams: Vec<&[u8]>) -> (usize, Vec<GramId>) {
         let query_count = grams.len();
         let mut query_ids: Vec<GramId> = grams
             .iter()
-            .filter_map(|gram| self.gram_to_id.get(gram).copied())
+            .filter_map(|gram| self.gram_to_id.get(*gram).copied())
             .collect();
         query_ids.sort_unstable();
         (query_count, query_ids)
@@ -434,7 +468,7 @@ impl NativeNgramIndex {
         for index in intersection_counts.keys() {
             let candidate_grams = &self.gram_sets[*index];
             let intersection = intersection_size_ids(query_ids, candidate_grams);
-            let union = query_count + self.gram_counts[*index] - intersection;
+            let union = query_count + candidate_grams.len() - intersection;
             let score = if union == 0 {
                 1.0
             } else {
@@ -468,22 +502,26 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-fn char_ngrams(text: &str, orders: &[usize]) -> Vec<String> {
+fn char_ngram_slices<'a>(text: &'a str, orders: &[usize]) -> Vec<&'a [u8]> {
     if text.is_empty() {
         return Vec::new();
     }
 
-    let chars: Vec<char> = text.chars().collect();
+    let mut offsets: Vec<usize> = text.char_indices().map(|(idx, _)| idx).collect();
+    offsets.push(text.len());
+    let char_count = offsets.len() - 1;
     let min_order = orders.iter().copied().min().unwrap_or(1);
-    if chars.len() < min_order {
-        return vec![text.to_string()];
+    if char_count < min_order {
+        return vec![text.as_bytes()];
     }
 
-    let mut grams: Vec<String> = Vec::new();
+    let mut grams: Vec<&[u8]> = Vec::new();
     for order in orders {
-        if *order <= chars.len() {
-            for start in 0..=(chars.len() - *order) {
-                grams.push(chars[start..start + *order].iter().collect());
+        if *order <= char_count {
+            for start in 0..=(char_count - *order) {
+                let byte_start = offsets[start];
+                let byte_end = offsets[start + *order];
+                grams.push(&text.as_bytes()[byte_start..byte_end]);
             }
         }
     }
@@ -525,11 +563,11 @@ fn intersection_size_ids(left: &[GramId], right: &[GramId]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{char_ngrams, jaccard_ids};
+    use super::{char_ngram_slices, jaccard_ids};
 
     #[test]
     fn char_ngrams_short_text_matches_python_semantics() {
-        assert_eq!(char_ngrams("ab", &[3, 4, 5]), vec!["ab"]);
+        assert_eq!(char_ngram_slices("ab", &[3, 4, 5]), vec![b"ab".as_slice()]);
     }
 
     #[test]

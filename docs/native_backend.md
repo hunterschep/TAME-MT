@@ -39,18 +39,20 @@ python -m twine check dist/*
 ## Semantics
 
 Python owns normalization and report generation. The native layer receives
-already-normalized strings, interns character n-grams into compact integer IDs,
-builds integer postings, and returns deterministically sorted nearest-neighbor
-results. Ties are resolved by lower training index.
+already-normalized strings, derives character n-grams as UTF-8 byte slices,
+interns each distinct n-gram into compact integer IDs, builds integer postings,
+and returns deterministically sorted nearest-neighbor results. Exact-match maps
+store normalized strings, so exact source/target overlap is literal after
+normalization. Ties are resolved by lower training index.
 
 `native_exact` preserves exact nearest-neighbor retrieval over candidates that
 share query n-grams. `native_fast` is approximate because it bounds rare-gram
 candidate generation before exact Jaccard reranking. The report signature records
 the resolved backend.
 
-Corpus-level batch queries release the Python GIL and use Rayon for parallel
-query execution inside Rust. Python still owns file IO, SacreBLEU scoring, JSON
-serialization, and report formatting.
+Corpus-level batch queries and batched pair reranking release the Python GIL and
+use Rayon for parallel execution inside Rust. Python still owns file IO,
+SacreBLEU scoring, JSON serialization, and report formatting.
 
 Pair exposure uses native pair reranking when both source and target indexes are
 native. Python builds deterministic candidate ID lists from source and target
@@ -62,8 +64,8 @@ semantics through a fallback path.
 
 ## Persistent Indexes
 
-The native index can serialize its compact gram-ID tables, postings, document
-gram sets, and exact-match map with `bincode`. The public workflow is:
+The native index can serialize its compact n-gram-to-ID tables, postings,
+document gram sets, and exact-match map with `bincode`. The public workflow is:
 
 ```bash
 tame-mt index build \

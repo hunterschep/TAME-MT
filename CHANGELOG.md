@@ -10,6 +10,12 @@
 - Added a native Rust/PyO3 nearest-neighbor backend with exact and bounded fast
   retrieval modes, compact integer n-gram indexes, parallel batch query, bulk
   candidate scoring, and pure-Python fallback modes.
+- Optimized the native backend by interning character n-grams from UTF-8 slices
+  instead of allocating per-occurrence gram strings, reducing native index build
+  time while preserving exact n-gram identity and literal normalized-string
+  exact-match maps.
+- Parallelized batched native pair reranking and removed redundant exact-match
+  checks from exposure assembly for faster large-test audits.
 - Added persistent `.tameidx` native index bundles plus `tame-mt index build`,
   `tame-mt index inspect`, and `score`/`audit --index` reuse workflows for
   large training corpora.

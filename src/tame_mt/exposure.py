@@ -78,30 +78,32 @@ def compute_exposure_result(
         and source_index.supports_native_pair_candidates(target_index)
         else None
     )
+    normalized_test_src = (
+        [normalize_text(source, config.normalization) for source in test_src]
+        if exact_pair_keys is not None
+        else []
+    )
+    normalized_refs_by_ref = (
+        [[normalize_text(text, config.normalization) for text in ref] for ref in refs]
+        if exact_pair_keys is not None and refs is not None
+        else []
+    )
 
     exposures: list[SegmentExposure] = []
     for idx, source_text in enumerate(test_src):
         source_top = source_tops_by_segment[idx]
         src_nn = source_top[0] if source_top else NeighborResult(index=None, score=0.0, exact=False)
-        norm_source = normalize_text(source_text, config.normalization)
-        source_exact = source_index.contains_exact_normalized(norm_source)
+        source_exact = src_nn.exact
 
         ref_texts = [ref[idx] for ref in refs] if refs is not None else []
         target_tops = [tops_by_ref[idx] for tops_by_ref in target_tops_by_ref]
         target_nn = _best_target_neighbor(target_tops) if target_index else None
-        target_exact = (
-            any(
-                target_index.contains_exact_normalized(normalize_text(ref, config.normalization))
-                for ref in ref_texts
-            )
-            if target_index is not None
-            else None
-        )
+        target_exact = _has_exact_neighbor(target_tops) if target_index is not None else None
         pair_exact = (
             any(
-                exact_pair_key(norm_source, normalize_text(ref, config.normalization))
+                exact_pair_key(normalized_test_src[idx], normalized_refs_by_ref[ref_idx][idx])
                 in exact_pair_keys
-                for ref in ref_texts
+                for ref_idx in range(len(ref_texts))
             )
             if exact_pair_keys is not None
             else None
@@ -243,6 +245,10 @@ def _best_target_neighbor(target_tops: list[list[NeighborResult]]) -> NeighborRe
         if result.score > best.score or (result.score == best.score and result_index < best_index):
             best = result
     return best
+
+
+def _has_exact_neighbor(target_tops: list[list[NeighborResult]]) -> bool:
+    return any(top_results and top_results[0].exact for top_results in target_tops)
 
 
 def _compute_pair_neighbor(

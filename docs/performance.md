@@ -87,15 +87,20 @@ and 2,000 test pairs completed as follows:
 | OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
 | OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
 | OPUS-100 `de-en`, 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~4.2s |
-| Synthetic 100k train / 2k test, one-time index build | `native_fast` | ~4.0s |
-| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~1.0s |
-| Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.6s |
+| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~3.2s |
+| Synthetic 100k train / 2k test, one-time index build | `native_fast` | ~2.6s |
+| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~0.7s |
+| Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.4s |
+| Synthetic 100k train / 10k test, fresh audit | `native_fast` | ~5.2s |
+| Synthetic 100k train / 10k test, one-time index build | `native_fast` | ~2.6s |
+| Synthetic 100k train / 10k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.8s |
+| Synthetic 100k train / 10k test, cached hypothesis scoring | cached diagnostics | ~2.3s |
 
 These numbers are smoke timings, not universal performance claims. Report the
 machine, corpus size, backend, and full TAME-MT signature for benchmark tables.
 The OPUS-100 100k source+target `.tameidx` bundle was about 383 MB because
-bundles are currently stored uncompressed to favor load speed.
+bundles are currently stored uncompressed to favor load speed. The synthetic
+100k source+target `.tameidx` bundle in the table above was about 323 MB.
 
 The cached path still runs SacreBLEU/chrF over system and TM outputs, but it no
 longer touches the training corpus. TAME-MT aggregates SacreBLEU segment

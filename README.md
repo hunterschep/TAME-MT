@@ -601,11 +601,13 @@ OPUS-100 `de-en` slice, a fresh `native_fast` audit took about 10.0 seconds, the
 one-time `.tameidx` build took about 9.6 seconds, and a later audit from the
 saved index took about 2.3 seconds with identical exposure outputs.
 
-On a synthetic 100,000 train / 2,000 test benchmark on the same machine, a fresh
-`native_fast` audit takes about 4.2 seconds, an indexed audit takes about 1.0
-second, and cached scoring for another hypothesis takes about 0.6 seconds. The
-cached stage is the closest analogue to ordinary BLEU/chrF scoring because it no
-longer touches the training corpus.
+On a synthetic benchmark on the same machine, a 100,000 train / 2,000 test
+`native_fast` audit takes about 3.2 seconds fresh, about 0.7 seconds from a
+saved `.tameidx`, and about 0.4 seconds for cached scoring of another
+hypothesis. At 100,000 train / 10,000 test, the same path takes about 5.2
+seconds fresh, about 2.8 seconds from a saved `.tameidx`, and about 2.3 seconds
+for cached scoring. The cached stage is the closest analogue to ordinary
+BLEU/chrF scoring because it no longer touches the training corpus.
 
 For production evaluation, use a staged workflow:
 
