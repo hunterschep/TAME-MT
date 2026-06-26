@@ -8,7 +8,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from tame_mt import IndexConfig, ScoreConfig, TameScorer, save_index_bundle
+from tame_mt import IndexConfig, ScoreConfig, TameScorer, load_index_bundle, save_index_bundle
 from tame_mt.exceptions import TameMTError
 from tame_mt.native import native_status
 
@@ -25,7 +25,12 @@ def main() -> int:
     parser.add_argument("--max-seconds", type=float, default=None)
     parser.add_argument("--staged", action="store_true", help="also benchmark index reuse stages")
     parser.add_argument("--max-index-build-seconds", type=float, default=None)
-    parser.add_argument("--max-indexed-seconds", type=float, default=None)
+    parser.add_argument(
+        "--max-indexed-seconds",
+        type=float,
+        default=None,
+        help="staged mode threshold for .tameidx load plus indexed audit time",
+    )
     parser.add_argument("--max-cached-seconds", type=float, default=None)
     parser.add_argument("--assert-thresholds", action="store_true")
     args = parser.parse_args()
@@ -92,14 +97,19 @@ def run_staged_benchmark(
 
         started = time.perf_counter()
         try:
-            bundle = save_index_bundle(index_path, train_src, train_tgt, config)
+            save_index_bundle(index_path, train_src, train_tgt, config)
         except TameMTError as exc:
             raise SystemExit(f"staged benchmark requires native index persistence: {exc}") from exc
         index_build_seconds = time.perf_counter() - started
 
         started = time.perf_counter()
+        bundle = load_index_bundle(index_path, config)
+        index_load_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
         indexed_result = scorer.evaluate_index_bundle(bundle, test_src, [refs], hyp=None)
         indexed_audit_seconds = time.perf_counter() - started
+        indexed_total_seconds = index_load_seconds + indexed_audit_seconds
 
         started = time.perf_counter()
         cached_report = scorer.score_from_artifacts(
@@ -116,7 +126,9 @@ def run_staged_benchmark(
 
         return {
             "index_build_seconds": index_build_seconds,
+            "index_load_seconds": index_load_seconds,
             "indexed_audit_seconds": indexed_audit_seconds,
+            "indexed_total_seconds": indexed_total_seconds,
             "cached_score_seconds": cached_score_seconds,
             "index_bytes": index_path.stat().st_size,
             "indexed_backend": indexed_result.report.backend["name"],
@@ -140,7 +152,7 @@ def assert_stage_thresholds(
             if max_index_build_seconds is not None
             else (8.0 if small else 60.0)
         ),
-        "indexed_audit_seconds": (
+        "indexed_total_seconds": (
             max_indexed_seconds if max_indexed_seconds is not None else (4.0 if small else 15.0)
         ),
         "cached_score_seconds": (

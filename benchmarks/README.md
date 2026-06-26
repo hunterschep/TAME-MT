@@ -14,6 +14,9 @@ Run the production-style staged benchmark:
 python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
 ```
 
+Staged output reports index build time, `.tameidx` load time, indexed audit
+time, load-plus-audit total time, cached scoring time, and bundle size.
+
 Run a larger local check:
 
 ```bash

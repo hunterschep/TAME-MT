@@ -33,6 +33,7 @@
 - Applied `.gz` output support consistently to TM baseline metadata JSONL.
 - Extended the synthetic benchmark with staged index-build, indexed-audit, and
   cached-scoring timings.
+- Made staged benchmark indexed timings include persisted `.tameidx` load time.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.
