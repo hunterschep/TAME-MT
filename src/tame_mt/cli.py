@@ -26,6 +26,7 @@ from tame_mt.config import (
 from tame_mt.exceptions import TameMTError
 from tame_mt.io import ensure_parent_dir, read_lines, write_lines
 from tame_mt.native import native_status
+from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
 from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
 from tame_mt.version import __version__
 
@@ -74,8 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_config_args(score_parser)
     _add_segment_args(score_parser, include_hyp=True)
-    score_parser.add_argument("--train-src", required=True, help="training source text file")
-    score_parser.add_argument("--train-tgt", required=True, help="training target text file")
+    score_parser.add_argument("--index", help="load a reusable training index bundle")
+    score_parser.add_argument("--train-src", help="training source text file")
+    score_parser.add_argument("--train-tgt", help="training target text file")
     score_parser.add_argument("--test-src", required=True, help="test source text file")
     score_parser.add_argument(
         "--ref", action="append", required=True, help="reference file; repeat for multi-ref"
@@ -99,7 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_config_args(audit_parser)
     _add_segment_args(audit_parser, include_hyp=False)
-    audit_parser.add_argument("--train-src", required=True, help="training source text file")
+    audit_parser.add_argument("--index", help="load a reusable training index bundle")
+    audit_parser.add_argument("--train-src", help="training source text file")
     audit_parser.add_argument("--train-tgt", help="training target text file")
     audit_parser.add_argument("--test-src", required=True, help="test source text file")
     audit_parser.add_argument("--ref", action="append", help="reference file; repeat for multi-ref")
@@ -130,6 +133,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", action="store_true", help="suppress human-readable stdout report"
     )
     cached_parser.set_defaults(handler=run_score_cached)
+
+    index_parser = subparsers.add_parser(
+        "index",
+        help="build or inspect reusable training index bundles",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    index_subparsers = index_parser.add_subparsers(dest="index_command", required=True)
+    index_build_parser = index_subparsers.add_parser(
+        "build",
+        help="build a reusable native training index bundle",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_config_args(index_build_parser)
+    index_build_parser.add_argument("--train-src", required=True, help="training source text file")
+    index_build_parser.add_argument("--train-tgt", help="training target text file")
+    index_build_parser.add_argument("--out", required=True, help="write index bundle")
+    index_build_parser.add_argument(
+        "--quiet", action="store_true", help="suppress index-build summary"
+    )
+    index_build_parser.set_defaults(handler=run_index_build)
+
+    index_inspect_parser = index_subparsers.add_parser(
+        "inspect",
+        help="print index bundle metadata without loading native indexes",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    index_inspect_parser.add_argument("path", help="index bundle to inspect")
+    index_inspect_parser.set_defaults(handler=run_index_inspect)
 
     tm_parser = subparsers.add_parser(
         "tm-baseline",
@@ -179,14 +210,24 @@ def run_doctor(args: argparse.Namespace) -> int:
 
 def run_score(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    train_src = read_lines(args.train_src)
-    train_tgt = read_lines(args.train_tgt)
     test_src = read_lines(args.test_src)
     refs = [read_lines(path) for path in args.ref]
     hyp = read_lines(args.hyp)
 
     scorer = TameScorer(config)
-    result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp)
+    if args.index:
+        bundle = load_index_bundle(args.index, config)
+        if bundle.train_tgt is None:
+            raise TameMTError("indexed train.tgt is required for score mode")
+        train_src = bundle.train_src
+        train_tgt = bundle.train_tgt
+        result = scorer.evaluate_index_bundle(bundle, test_src, refs, hyp)
+    else:
+        train_src_path = _required_arg(args, "train_src", "--train-src")
+        train_tgt_path = _required_arg(args, "train_tgt", "--train-tgt")
+        train_src = read_lines(train_src_path)
+        train_tgt = read_lines(train_tgt_path)
+        result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp)
     if args.tm_out:
         write_lines(args.tm_out, result.tm_hyp)
     if args.json_out:
@@ -214,13 +255,20 @@ def run_score(args: argparse.Namespace) -> int:
 
 def run_audit(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    train_src = read_lines(args.train_src)
-    train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
     test_src = read_lines(args.test_src)
     refs = [read_lines(path) for path in args.ref] if args.ref else None
 
     scorer = TameScorer(config)
-    result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp=None)
+    if args.index:
+        bundle = load_index_bundle(args.index, config)
+        train_src = bundle.train_src
+        train_tgt = bundle.train_tgt
+        result = scorer.evaluate_index_bundle(bundle, test_src, refs, hyp=None)
+    else:
+        train_src_path = _required_arg(args, "train_src", "--train-src")
+        train_src = read_lines(train_src_path)
+        train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
+        result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp=None)
     if args.json_out:
         write_json_report(args.json_out, result.report)
     if args.segment_out:
@@ -261,6 +309,37 @@ def run_score_cached(args: argparse.Namespace) -> int:
         write_json_report(args.json_out, report)
     if not args.quiet:
         print(render_text_report(report))
+    return 0
+
+
+def run_index_build(args: argparse.Namespace) -> int:
+    config = _config_from_args(args)
+    train_src = read_lines(args.train_src)
+    train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
+    bundle = save_index_bundle(args.out, train_src, train_tgt, config)
+    if not args.quiet:
+        print(
+            "\n".join(
+                [
+                    f"Index bundle:    {args.out}",
+                    f"Train segments:  {len(bundle.train_src):,}",
+                    f"Source backend:  {bundle.source_index.backend_info.resolved_mode}",
+                    "Target backend:  "
+                    + (
+                        bundle.target_index.backend_info.resolved_mode
+                        if bundle.target_index is not None
+                        else "not included"
+                    ),
+                    "Privacy:         stores raw training text and normalized exact-match keys",
+                ]
+            )
+        )
+    return 0
+
+
+def run_index_inspect(args: argparse.Namespace) -> int:
+    manifest = inspect_index_bundle(args.path)
+    print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -451,6 +530,13 @@ def _warn_neighbor_text(args: argparse.Namespace) -> None:
             "Warning: --include-neighbor-text may write raw training text to the segment report.",
             file=sys.stderr,
         )
+
+
+def _required_arg(args: argparse.Namespace, attr: str, flag: str) -> str:
+    value = getattr(args, attr)
+    if value is None:
+        raise TameMTError(f"{flag} is required unless --index is provided")
+    return str(value)
 
 
 def _parse_metrics(values: list[str]) -> tuple[str, ...]:

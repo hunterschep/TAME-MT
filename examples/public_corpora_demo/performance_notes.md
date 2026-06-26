@@ -17,7 +17,23 @@ data. TAME-MT now uses a production-oriented two-stage path.
 
 ## Cached Scoring Workflow
 
-For repeated system comparisons, compute train-aware diagnostics once:
+For repeated runs over the same training corpus, build a reusable native index:
+
+```bash
+tame-mt index build \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --out train.tameidx
+
+tame-mt audit \
+  --index train.tameidx \
+  --test-src test.src \
+  --ref test.ref \
+  --json-out audit.json
+```
+
+For repeated system comparisons on the same train/test/reference setup, compute
+train-aware diagnostics once:
 
 ```bash
 tame-mt audit \
@@ -51,11 +67,18 @@ pairs and 2,000 test pairs:
 | `tame-mt audit --segment-out` on prepared files | `native_fast` | ~6.4s |
 | `tame-mt score-cached` for one hypothesis | cached diagnostics | ~1.8s |
 | Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
-| OPUS-100 `de-en`, 100k train / 2k test, after download cache | `native_fast` | ~11.4s |
+| OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~9.9s |
+| OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.7s |
+| OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~3.3s |
 | Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
 
-The first step is the train-aware cost. The second step is the repeated-system
-cost and is much closer to ordinary BLEU/chrF evaluation.
+The index-build step is the reusable training-corpus cost. The audit step is
+the train/test/reference diagnostic cost. The cached-score step is the
+repeated-system cost and is much closer to ordinary BLEU/chrF evaluation.
+
+The local OPUS-100 100k source+target `.tameidx` bundle was about 368 MB. That
+is intentionally an uncompressed speed-oriented artifact, not a publication
+format.
 
 These timings are a smoke benchmark, not a formal performance claim. They are
 included to make the intended large-corpus workflow concrete.

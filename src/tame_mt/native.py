@@ -45,3 +45,12 @@ def build_native_index(
         max_candidates,
         rerank_limit,
     )
+
+
+def native_index_to_bytes(native_index: Any) -> bytes:
+    return bytes(native_index.to_bytes())
+
+
+def native_index_from_bytes(data: bytes) -> Any:
+    module = import_module("tame_mt._native")
+    return module.NativeNgramIndex.from_bytes(data)

@@ -4,9 +4,11 @@ from dataclasses import dataclass
 
 from tame_mt.bins import compute_generalization_gap, score_bins
 from tame_mt.config import ScoreConfig
-from tame_mt.exceptions import InputDataError
+from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.exposure import compute_exposure_result, summarize_exposures
+from tame_mt.index import NgramInvertedIndex
 from tame_mt.io import read_lines, validate_corpus_inputs, validate_equal_lengths
+from tame_mt.persistence import IndexBundle
 from tame_mt.report import build_signature, config_to_dict
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.scoring import delta_scores, score_metrics
@@ -132,6 +134,54 @@ class TameScorer:
             warnings=warnings,
         )
 
+    def evaluate_index_bundle(
+        self,
+        bundle: IndexBundle,
+        test_src: list[str],
+        refs: list[list[str]] | None,
+        hyp: list[str] | None = None,
+    ) -> EvaluationResult:
+        self._validate_bundle_config(bundle)
+        validate_corpus_inputs(
+            train_src=bundle.train_src,
+            train_tgt=bundle.train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=hyp,
+        )
+        if bundle.train_tgt is None and hyp is not None:
+            raise InputDataError(
+                "indexed train.tgt is required for full scoring because the TM baseline needs "
+                "targets"
+            )
+        return self._evaluate_validated(
+            train_src=bundle.train_src,
+            train_tgt=bundle.train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=hyp,
+            source_index=bundle.source_index,
+            target_index=bundle.target_index,
+            index_reused=True,
+        )
+
+    def _validate_bundle_config(self, bundle: IndexBundle) -> None:
+        if bundle.source_index.norm_config != self.config.normalization:
+            raise ConfigurationError("index bundle normalization does not match scorer config")
+        if bundle.source_index.sim_config != self.config.similarity:
+            raise ConfigurationError("index bundle similarity does not match scorer config")
+        if bundle.source_index.index_config != self.config.index:
+            raise ConfigurationError("index bundle retrieval settings do not match scorer config")
+        if bundle.target_index is not None:
+            if bundle.target_index.norm_config != self.config.normalization:
+                raise ConfigurationError("target index normalization does not match scorer config")
+            if bundle.target_index.sim_config != self.config.similarity:
+                raise ConfigurationError("target index similarity does not match scorer config")
+            if bundle.target_index.index_config != self.config.index:
+                raise ConfigurationError(
+                    "target index retrieval settings do not match scorer config"
+                )
+
     def evaluate_corpus(
         self,
         train_src: list[str],
@@ -151,8 +201,37 @@ class TameScorer:
             raise InputDataError(
                 "train.tgt is required for full scoring because the TM baseline needs targets"
             )
+        return self._evaluate_validated(
+            train_src=train_src,
+            train_tgt=train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=hyp,
+            source_index=None,
+            target_index=None,
+            index_reused=False,
+        )
 
-        exposure_result = compute_exposure_result(train_src, train_tgt, test_src, refs, self.config)
+    def _evaluate_validated(
+        self,
+        train_src: list[str],
+        train_tgt: list[str] | None,
+        test_src: list[str],
+        refs: list[list[str]] | None,
+        hyp: list[str] | None,
+        source_index: NgramInvertedIndex | None,
+        target_index: NgramInvertedIndex | None,
+        index_reused: bool,
+    ) -> EvaluationResult:
+        exposure_result = compute_exposure_result(
+            train_src=train_src,
+            train_tgt=train_tgt,
+            test_src=test_src,
+            refs=refs,
+            config=self.config,
+            source_index=source_index,
+            target_index=target_index,
+        )
         exposures = exposure_result.segments
         tm_hyp: list[str] = []
         tm_results: list[SegmentTMResult] = []
@@ -199,7 +278,7 @@ class TameScorer:
                 "exact": exposure_result.backend.exact,
                 "requested_mode": exposure_result.backend.requested_mode,
                 "resolved_mode": exposure_result.backend.resolved_mode,
-                "index_reused": False,
+                "index_reused": index_reused,
             },
             system_scores=system_scores,
             tm_scores=tm_scores,

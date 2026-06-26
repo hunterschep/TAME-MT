@@ -24,7 +24,30 @@ overlap rates remain exact.
 
 ## Recommended Workflow
 
-Run the train-aware audit once:
+There are two reuse levels.
+
+Use an index bundle when the training corpus is fixed but test sets or
+configuration may change:
+
+```bash
+tame-mt index build \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --out train.tameidx
+
+tame-mt audit \
+  --index train.tameidx \
+  --test-src test.src \
+  --ref test.ref \
+  --json-out audit.json
+```
+
+This skips native source/target index construction on later runs. The bundle is
+an uncompressed zip container for faster load time. It stores raw training text
+and normalized exact-match keys, so treat it as training data.
+
+Use cached segment diagnostics when the train/test/reference setup is fixed and
+only system outputs change. Run the train-aware audit once:
 
 ```bash
 tame-mt audit \
@@ -61,8 +84,12 @@ and 2,000 test pairs completed as follows:
 | Direct CLI audit on prepared files | `native_fast` | ~6.4s |
 | `score-cached` for one hypothesis | cached diagnostics | ~1.8s |
 | Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
-| OPUS-100 `de-en`, 100k train / 2k test, after download cache | `native_fast` | ~11.4s |
+| OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~9.9s |
+| OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.7s |
+| OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~3.3s |
 | Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
 
 These numbers are smoke timings, not universal performance claims. Report the
 machine, corpus size, backend, and full TAME-MT signature for benchmark tables.
+The OPUS-100 100k source+target `.tameidx` bundle was about 368 MB because
+bundles are currently stored uncompressed to favor load speed.

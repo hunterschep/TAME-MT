@@ -10,6 +10,9 @@
 - Added a native Rust/PyO3 nearest-neighbor backend with exact and bounded fast
   retrieval modes, compact integer n-gram indexes, parallel batch query, bulk
   candidate scoring, and pure-Python fallback modes.
+- Added persistent `.tameidx` native index bundles plus `tame-mt index build`,
+  `tame-mt index inspect`, and `score`/`audit --index` reuse workflows for
+  large training corpora.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

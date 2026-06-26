@@ -35,6 +35,31 @@ tame-mt score \
   --tm-out /tmp/tame_tm.out \
   --quiet
 
+tame-mt index build \
+  --train-src tests/fixtures/train.src \
+  --train-tgt tests/fixtures/train.tgt \
+  --out /tmp/tame_fixture.tameidx \
+  --quiet
+
+tame-mt score \
+  --index /tmp/tame_fixture.tameidx \
+  --test-src tests/fixtures/test.src \
+  --ref tests/fixtures/test.ref \
+  --hyp tests/fixtures/hyp.out \
+  --json-out /tmp/tame_index_report.json \
+  --quiet
+
+python - <<'PY'
+import json
+from pathlib import Path
+
+fresh = json.loads(Path("/tmp/tame_report.json").read_text(encoding="utf-8"))
+indexed = json.loads(Path("/tmp/tame_index_report.json").read_text(encoding="utf-8"))
+assert fresh["quality"] == indexed["quality"]
+assert fresh["exposure"] == indexed["exposure"]
+assert indexed["backend"]["index_reused"] is True
+PY
+
 python examples/public_corpora_demo/run_opus100_demo.py \
   --pair de-en \
   --train-limit 50000 \

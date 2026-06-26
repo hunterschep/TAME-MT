@@ -6,7 +6,12 @@ from typing import Any
 
 from tame_mt.config import IndexConfig, NormalizationConfig, SimilarityConfig
 from tame_mt.exceptions import BackendError
-from tame_mt.native import build_native_index, is_native_available, native_status
+from tame_mt.native import (
+    build_native_index,
+    is_native_available,
+    native_index_to_bytes,
+    native_status,
+)
 from tame_mt.ngrams import char_ngrams
 from tame_mt.normalize import normalize_text
 from tame_mt.similarity import jaccard
@@ -133,6 +138,45 @@ class NgramInvertedIndex:
                 requested_mode=index_config.mode,
                 resolved_mode=resolved_mode,
             ),
+        )
+
+    @classmethod
+    def from_native(
+        cls,
+        lines: list[str],
+        native_index: Any,
+        norm_config: NormalizationConfig,
+        sim_config: SimilarityConfig,
+        index_config: IndexConfig,
+        resolved_mode: str,
+    ) -> NgramInvertedIndex:
+        if not resolved_mode.startswith("native_"):
+            raise BackendError(
+                f"native index wrapper requires a native mode, got {resolved_mode!r}"
+            )
+
+        normalized_lines = [normalize_text(line, norm_config) for line in lines]
+        exact_map: dict[str, list[int]] = defaultdict(list)
+        for idx, line in enumerate(normalized_lines):
+            exact_map[line].append(idx)
+
+        return cls(
+            normalized_lines=normalized_lines,
+            gram_sets=None,
+            postings=None,
+            exact_map={line: indices for line, indices in exact_map.items()},
+            norm_config=norm_config,
+            sim_config=sim_config,
+            index_config=index_config,
+            resolved_mode=resolved_mode,
+            backend_info=IndexBackendInfo(
+                name=resolved_mode,
+                native=True,
+                exact=resolved_mode == "native_exact",
+                requested_mode=index_config.mode,
+                resolved_mode=resolved_mode,
+            ),
+            native_index=native_index,
         )
 
     def query_best(self, text: str) -> NeighborResult:
@@ -296,6 +340,11 @@ class NgramInvertedIndex:
                 raise IndexError(f"candidate index out of range: {index}")
             scores[index] = jaccard(query_grams, self.gram_sets[index])
         return scores
+
+    def native_bytes(self) -> bytes:
+        if self._native_index is None:
+            raise BackendError("native index bytes are only available for the native backend")
+        return native_index_to_bytes(self._native_index)
 
     def normalized(self, text: str) -> str:
         return normalize_text(text, self.norm_config)

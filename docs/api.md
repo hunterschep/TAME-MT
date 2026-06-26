@@ -69,6 +69,38 @@ tm_hypotheses = result.tm_hyp
 tm_metadata = result.tm_results
 ```
 
+## Persistent Index Bundles
+
+For repeated runs over the same training corpus, build and save a native index
+bundle:
+
+```python
+from tame_mt import ScoreConfig, TameScorer, load_index_bundle, save_index_bundle
+
+config = ScoreConfig()
+save_index_bundle(
+    "train.tameidx",
+    train_src=train_src_lines,
+    train_tgt=train_tgt_lines,
+    config=config,
+)
+
+bundle = load_index_bundle("train.tameidx", config)
+result = TameScorer(config).evaluate_index_bundle(
+    bundle=bundle,
+    test_src=test_src_lines,
+    refs=[ref_lines],
+    hyp=hyp_lines,
+)
+```
+
+`result.report.backend["index_reused"]` is `True` for this path. Bundle loading
+validates normalization, similarity, backend mode, and fast-mode settings before
+scoring so stale indexes do not silently produce mismatched signatures.
+
+Index bundles store raw training text and normalized exact-match keys. Treat
+them as training data.
+
 ## Cached Scoring
 
 For a fixed train/test/reference setup, compute exposure once with

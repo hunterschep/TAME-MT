@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from tame_mt.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -157,6 +159,80 @@ def test_cli_audit_source_only_works(tmp_path: Path) -> None:
     assert payload["quality"]["tm"] == {"bleu": None, "chrf": None}
     assert payload["exposure"]["target"] is None
     assert payload["exposure"]["pair"] is None
+
+
+def test_cli_index_build_inspect_and_score_reuse(tmp_path: Path, capsys) -> None:
+    pytest.importorskip("tame_mt._native")
+    index_path = tmp_path / "train.tameidx"
+    full_json = tmp_path / "full.json"
+    indexed_json = tmp_path / "indexed.json"
+
+    build_rc = main(
+        [
+            "index",
+            "build",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--index-mode",
+            "native_exact",
+            "--out",
+            str(index_path),
+            "--quiet",
+        ]
+    )
+    inspect_rc = main(["index", "inspect", str(index_path)])
+    inspect_out = capsys.readouterr().out
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--index-mode",
+            "native_exact",
+            "--json-out",
+            str(full_json),
+            "--quiet",
+        ]
+    )
+    indexed_rc = main(
+        [
+            "score",
+            "--index",
+            str(index_path),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--index-mode",
+            "native_exact",
+            "--json-out",
+            str(indexed_json),
+            "--quiet",
+        ]
+    )
+
+    assert build_rc == 0
+    assert inspect_rc == 0
+    assert json.loads(inspect_out)["format"] == "tameidx"
+    assert full_rc == 0
+    assert indexed_rc == 0
+    full = json.loads(full_json.read_text(encoding="utf-8"))
+    indexed = json.loads(indexed_json.read_text(encoding="utf-8"))
+    assert indexed["quality"] == full["quality"]
+    assert indexed["exposure"] == full["exposure"]
+    assert indexed["backend"]["index_reused"] is True
 
 
 def test_cli_reports_alignment_errors(tmp_path: Path, capsys) -> None:

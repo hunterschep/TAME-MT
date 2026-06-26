@@ -76,8 +76,28 @@ tame-mt score \
   --tm-out tm.out
 ```
 
-For large corpora or many system outputs, compute the train-aware diagnostics
-once and reuse them:
+For large corpora, build the training index once and reuse it:
+
+```bash
+tame-mt index build \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --out train.tameidx
+
+tame-mt score \
+  --index train.tameidx \
+  --test-src test.src \
+  --ref test.ref \
+  --hyp system_a.out \
+  --json-out system_a.tame.json
+```
+
+The `.tameidx` bundle stores the native source/target indexes plus the raw
+training text needed for TM outputs and optional segment reports. Treat it like
+the original training corpus for privacy and access control.
+
+If the train/test/reference setup is fixed and only hypotheses change, cache
+the train-aware diagnostics once and reuse them:
 
 ```bash
 tame-mt audit \
@@ -376,6 +396,21 @@ tame-mt score-cached \
   --num-train 125000
 ```
 
+Build a reusable training index and use it without passing train files again:
+
+```bash
+tame-mt index build \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --out train.tameidx
+
+tame-mt score \
+  --index train.tameidx \
+  --test-src test.src \
+  --ref test.ref \
+  --hyp system.out
+```
+
 Common options:
 
 ```bash
@@ -462,6 +497,16 @@ segments = result.exposures
 tm_output = result.tm_hyp
 ```
 
+Reuse a saved training index from Python:
+
+```python
+from tame_mt import load_index_bundle, save_index_bundle
+
+save_index_bundle("train.tameidx", train_src_lines, train_tgt_lines, scorer.config)
+bundle = load_index_bundle("train.tameidx", scorer.config)
+result = scorer.evaluate_index_bundle(bundle, test_src_lines, [ref_lines], hyp_lines)
+```
+
 ## JSON Output
 
 `--json-out` writes a stable top-level structure:
@@ -546,17 +591,23 @@ tame-mt doctor
 On the local development machine, the OPUS-100 `de-en` public-corpus audit at
 50,000 training pairs and 2,000 test pairs completed in about 6 seconds with
 `native_fast`; `score-cached` on the saved segment diagnostics took under 2
-seconds for an additional hypothesis.
+seconds for an additional hypothesis. On the 100,000 train / 2,000 test
+OPUS-100 `de-en` slice, a fresh `native_fast` audit took about 9.9 seconds, the
+one-time `.tameidx` build took about 9.7 seconds, and a later audit from the
+saved index took about 3.3 seconds with identical exposure outputs.
 
-For production evaluation, use a two-stage workflow:
+For production evaluation, use a staged workflow:
 
-1. Run `tame-mt audit --segment-out segments.jsonl` once for a fixed
-   train/test/reference setup.
-2. Run `tame-mt score-cached` for every system output.
+1. Run `tame-mt index build --out train.tameidx` once for a fixed training
+   corpus.
+2. Run `tame-mt audit --index train.tameidx --segment-out segments.jsonl` once
+   for a fixed train/test/reference setup.
+3. Run `tame-mt score-cached` for every system output.
 
-The first stage is train-aware and does nearest-neighbor retrieval. The second
-stage reuses cached exposure and TM hypotheses, so adding another system output
-does not require another pass over the training corpus.
+The index stage avoids rebuilding source/target postings. The audit stage is
+train-aware and does nearest-neighbor retrieval. The cached-score stage reuses
+exposure and TM hypotheses, so adding another system output does not require
+another pass over the training corpus.
 
 ## Privacy
 
@@ -566,6 +617,11 @@ text anywhere.
 Training data can still be sensitive. By default, TAME-MT does not print
 nearest-neighbor training text. Segment reports contain indices and scores
 unless raw text fields are explicitly requested.
+
+Index bundles created by `tame-mt index build` store raw training source/target
+lines and normalized exact-match keys so later runs can produce identical TM
+outputs and optional neighbor-text diagnostics. Do not publish `.tameidx` files
+unless the underlying training corpus can also be published.
 
 ## Limitations
 

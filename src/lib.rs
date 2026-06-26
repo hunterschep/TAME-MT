@@ -1,6 +1,8 @@
-use pyo3::exceptions::{PyIndexError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyOSError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 type NeighborTuple = (Option<usize>, f64, bool);
@@ -8,6 +10,7 @@ type GramId = u32;
 type DocId = u32;
 
 #[pyclass]
+#[derive(Serialize, Deserialize)]
 struct NativeNgramIndex {
     gram_sets: Vec<Vec<GramId>>,
     gram_counts: Vec<usize>,
@@ -127,6 +130,38 @@ impl NativeNgramIndex {
         format!("native_{}", self.mode)
     }
 
+    fn to_bytes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let payload = self.serialize_index()?;
+        Ok(PyBytes::new(py, &payload))
+    }
+
+    #[staticmethod]
+    fn from_bytes(data: &[u8]) -> PyResult<Self> {
+        bincode::deserialize(data)
+            .map_err(|exc| PyValueError::new_err(format!("invalid native index bytes: {exc}")))
+    }
+
+    fn save(&self, path: &str) -> PyResult<()> {
+        let payload = self.serialize_index()?;
+        std::fs::write(path, payload)
+            .map_err(|exc| PyOSError::new_err(format!("failed to write native index: {exc}")))
+    }
+
+    #[staticmethod]
+    fn load(path: &str) -> PyResult<Self> {
+        let payload = std::fs::read(path)
+            .map_err(|exc| PyOSError::new_err(format!("failed to read native index: {exc}")))?;
+        Self::from_bytes(&payload)
+    }
+
+    fn doc_count(&self) -> usize {
+        self.gram_sets.len()
+    }
+
+    fn gram_count(&self) -> usize {
+        self.postings.len()
+    }
+
     fn query_topk(&self, query_norm: &str, k: usize) -> Vec<NeighborTuple> {
         self.query_topk_impl(query_norm, k)
     }
@@ -180,6 +215,12 @@ impl NativeNgramIndex {
 }
 
 impl NativeNgramIndex {
+    fn serialize_index(&self) -> PyResult<Vec<u8>> {
+        bincode::serialize(self).map_err(|exc| {
+            PyValueError::new_err(format!("failed to serialize native index: {exc}"))
+        })
+    }
+
     fn query_topk_impl(&self, query_norm: &str, k: usize) -> Vec<NeighborTuple> {
         if k == 0 {
             return Vec::new();

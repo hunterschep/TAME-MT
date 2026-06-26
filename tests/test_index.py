@@ -1,6 +1,6 @@
 import pytest
 
-from tame_mt.config import IndexConfig
+from tame_mt.config import IndexConfig, NormalizationConfig, SimilarityConfig
 from tame_mt.index import NgramInvertedIndex
 
 
@@ -81,3 +81,33 @@ def test_score_candidates_matches_single_candidate_scoring() -> None:
     bulk_scores = index.score_candidates("abcdeg", indices)
     single_scores = {idx: index.score_candidate("abcdeg", idx) for idx in indices}
     assert bulk_scores == single_scores
+
+
+def test_native_index_bytes_roundtrip_when_available() -> None:
+    native_module = pytest.importorskip("tame_mt._native")
+    lines = ["abcdef", "uvwxyz", "abcxyz", "नमस्ते दुनिया"]
+    norm_config = NormalizationConfig()
+    sim_config = SimilarityConfig()
+    index_config = IndexConfig(mode="native_exact")
+    index = NgramInvertedIndex.build(
+        lines,
+        norm_config=norm_config,
+        sim_config=sim_config,
+        index_config=index_config,
+    )
+
+    native_bytes = index.native_bytes()
+    restored_native = native_module.NativeNgramIndex.from_bytes(native_bytes)
+    restored = NgramInvertedIndex.from_native(
+        lines=lines,
+        native_index=restored_native,
+        norm_config=norm_config,
+        sim_config=sim_config,
+        index_config=index_config,
+        resolved_mode="native_exact",
+    )
+
+    assert restored.query_topk("abcdeg", 3) == index.query_topk("abcdeg", 3)
+    assert restored.batch_query_topk(["abcdeg", "नमस्ते दुनिया"], 2) == index.batch_query_topk(
+        ["abcdeg", "नमस्ते दुनिया"], 2
+    )

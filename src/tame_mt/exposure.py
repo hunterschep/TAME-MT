@@ -33,18 +33,23 @@ def compute_exposure_result(
     test_src: list[str],
     refs: list[list[str]] | None,
     config: ScoreConfig,
+    source_index: NgramInvertedIndex | None = None,
+    target_index: NgramInvertedIndex | None = None,
 ) -> ExposureComputation:
-    source_index = NgramInvertedIndex.build(
-        train_src,
-        norm_config=config.normalization,
-        sim_config=config.similarity,
-        index_config=config.index,
-    )
-    target_index = (
-        NgramInvertedIndex.build(train_tgt, config.normalization, config.similarity, config.index)
-        if train_tgt is not None
-        else None
-    )
+    if source_index is None:
+        source_index = NgramInvertedIndex.build(
+            train_src,
+            norm_config=config.normalization,
+            sim_config=config.similarity,
+            index_config=config.index,
+        )
+    if target_index is None and train_tgt is not None:
+        target_index = NgramInvertedIndex.build(
+            train_tgt,
+            norm_config=config.normalization,
+            sim_config=config.similarity,
+            index_config=config.index,
+        )
     exact_source_set = set(source_index.normalized_lines)
     exact_target_set = set(target_index.normalized_lines) if target_index else None
     exact_pair_set = _build_exact_pair_set(train_src, train_tgt, config) if train_tgt else None

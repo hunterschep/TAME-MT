@@ -34,7 +34,9 @@ paper tables, dashboards, and downstream scripts.
 }
 ```
 
-For `score-cached`, `name` is `cached_segments` and `index_reused` is `true`.
+For `score --index` or `audit --index`, `index_reused` is `true` and `name`
+remains the resolved retrieval backend such as `native_fast`. For
+`score-cached`, `name` is `cached_segments` and `index_reused` is also `true`.
 
 ## Data
 
