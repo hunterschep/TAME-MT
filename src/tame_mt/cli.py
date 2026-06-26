@@ -24,7 +24,7 @@ from tame_mt.config import (
     parse_int_tuple,
 )
 from tame_mt.exceptions import TameMTError
-from tame_mt.io import ensure_parent_dir, read_lines, write_lines
+from tame_mt.io import ensure_parent_dir, open_text, read_lines, write_lines
 from tame_mt.native import native_status
 from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
 from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
@@ -355,7 +355,7 @@ def run_tm_baseline(args: argparse.Namespace) -> int:
     if args.metadata_out:
         metadata_path = Path(args.metadata_out)
         ensure_parent_dir(metadata_path)
-        with metadata_path.open("w", encoding="utf-8") as handle:
+        with open_text(metadata_path, "w") as handle:
             for item in result.tm_results:
                 handle.write(
                     json.dumps(

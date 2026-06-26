@@ -115,6 +115,32 @@ def test_cli_tm_baseline_writes_aligned_output(tmp_path: Path) -> None:
     assert len(out.read_text(encoding="utf-8").splitlines()) == 4
 
 
+def test_cli_tm_baseline_supports_gzip_outputs(tmp_path: Path) -> None:
+    out = tmp_path / "tm.out.gz"
+    metadata = tmp_path / "tm_metadata.jsonl.gz"
+    rc = main(
+        [
+            "tm-baseline",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--out",
+            str(out),
+            "--metadata-out",
+            str(metadata),
+        ]
+    )
+
+    assert rc == 0
+    assert len(read_lines(out)) == 4
+    metadata_rows = [json.loads(line) for line in read_lines(metadata)]
+    assert len(metadata_rows) == 4
+    assert {"index", "tm_source_index", "tm_source_similarity"} <= set(metadata_rows[0])
+
+
 def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
     full_json = tmp_path / "full.json"
     cached_json = tmp_path / "cached.json"

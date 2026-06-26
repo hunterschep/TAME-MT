@@ -30,6 +30,7 @@
   non-positive training counts.
 - Removed an unused experimental weighted-BLEU helper from the package surface.
 - Added transparent `.gz` support for corpus inputs and text/JSONL/JSON outputs.
+- Applied `.gz` output support consistently to TM baseline metadata JSONL.
 - Extended the synthetic benchmark with staged index-build, indexed-audit, and
   cached-scoring timings.
 - Added `tame-mt doctor` for install/backend diagnostics.

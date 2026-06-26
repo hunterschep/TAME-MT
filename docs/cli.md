@@ -111,8 +111,8 @@ Segment rows are validated before scoring. Indices must be unique and
 contiguous from `0` to `N-1`; valid rows may appear in any order and are sorted
 by index before metrics are computed.
 
-Any corpus, hypothesis, reference, JSON, or JSONL path ending in `.gz` is read
-or written as gzip-compressed UTF-8 text.
+Any corpus, hypothesis, reference, JSON, JSONL, TM output, or TM metadata path
+ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 
 ## Shared Options
 
