@@ -233,9 +233,14 @@ def _compute_pair_neighbor(
         candidates.update(_candidate_indices(top_results))
 
     best = NeighborResult(index=None, score=0.0, exact=False)
-    for candidate in sorted(candidates):
-        src_sim = source_index.score_candidate(source_text, candidate)
-        tgt_sim = max(target_index.score_candidate(ref, candidate) for ref in ref_texts)
+    sorted_candidates = sorted(candidates)
+    source_scores = source_index.score_candidates(source_text, sorted_candidates)
+    target_scores_by_ref = [
+        target_index.score_candidates(ref, sorted_candidates) for ref in ref_texts
+    ]
+    for candidate in sorted_candidates:
+        src_sim = source_scores[candidate]
+        tgt_sim = max(target_scores[candidate] for target_scores in target_scores_by_ref)
         pair_sim = min(src_sim, tgt_sim)
         if pair_sim > best.score:
             best = NeighborResult(index=candidate, score=pair_sim, exact=pair_sim == 1.0)

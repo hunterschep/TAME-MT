@@ -47,10 +47,12 @@ pairs and 2,000 test pairs:
 
 | Step | Backend | Time |
 | --- | --- | ---: |
-| `run_opus100_demo.py --pair de-en --train-limit 50000 --test-limit 2000` after download cache | `native_fast` | ~10.0s |
-| `tame-mt audit --segment-out` on prepared files | `native_fast` | ~10.4s |
+| `run_opus100_demo.py --pair de-en --train-limit 50000 --test-limit 2000` after download cache | `native_fast` | ~5.7s |
+| `tame-mt audit --segment-out` on prepared files | `native_fast` | ~6.4s |
 | `tame-mt score-cached` for one hypothesis | cached diagnostics | ~1.8s |
-| Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~35.4s |
+| Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
+| OPUS-100 `de-en`, 100k train / 2k test, after download cache | `native_fast` | ~11.4s |
+| Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
 
 The first step is the train-aware cost. The second step is the repeated-system
 cost and is much closer to ordinary BLEU/chrF evaluation.

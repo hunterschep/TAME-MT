@@ -57,10 +57,12 @@ and 2,000 test pairs completed as follows:
 
 | Step | Backend | Time |
 | --- | --- | ---: |
-| Public demo after download cache | `native_fast` | ~10.0s |
-| Direct CLI audit on prepared files | `native_fast` | ~10.4s |
+| Public demo after download cache | `native_fast` | ~5.7s |
+| Direct CLI audit on prepared files | `native_fast` | ~6.4s |
 | `score-cached` for one hypothesis | cached diagnostics | ~1.8s |
-| Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~35.4s |
+| Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
+| OPUS-100 `de-en`, 100k train / 2k test, after download cache | `native_fast` | ~11.4s |
+| Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
 
 These numbers are smoke timings, not universal performance claims. Report the
 machine, corpus size, backend, and full TAME-MT signature for benchmark tables.

@@ -544,7 +544,7 @@ tame-mt doctor
 ```
 
 On the local development machine, the OPUS-100 `de-en` public-corpus audit at
-50,000 training pairs and 2,000 test pairs completed in about 10 seconds with
+50,000 training pairs and 2,000 test pairs completed in about 6 seconds with
 `native_fast`; `score-cached` on the saved segment diagnostics took under 2
 seconds for an additional hypothesis.
 

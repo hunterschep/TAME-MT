@@ -11,10 +11,10 @@ supervised train/test splits.
 
 | Pair | Direction | Train | Test | Backend | Audit s | TM-BLEU | TM-chrF | Mean SX | SourceNearDup@0.85 | PairLeak@0.85 | ExactPair | Far % |
 | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| de-en | de->en | 50,000 | 2,000 | native_fast | 9.82 | 7.77 | 19.41 | 0.184 | 0.60% | 0.15% | 0.00% | 83.50% |
-| en-hi | en->hi | 50,000 | 2,000 | native_fast | 9.19 | 5.37 | 19.99 | 0.254 | 1.10% | 0.10% | 0.00% | 69.55% |
-| en-tr | en->tr | 50,000 | 2,000 | native_fast | 5.87 | 1.57 | 14.31 | 0.213 | 0.75% | 0.20% | 0.00% | 79.80% |
-| ar-en | ar->en | 50,000 | 2,000 | native_fast | 7.57 | 4.60 | 18.85 | 0.168 | 0.45% | 0.15% | 0.00% | 87.40% |
+| de-en | de->en | 50,000 | 2,000 | native_fast | 5.66 | 7.44 | 19.23 | 0.185 | 0.60% | 0.15% | 0.00% | 83.40% |
+| en-hi | en->hi | 50,000 | 2,000 | native_fast | 5.42 | 5.32 | 19.75 | 0.254 | 1.10% | 0.10% | 0.00% | 69.60% |
+| en-tr | en->tr | 50,000 | 2,000 | native_fast | 2.69 | 1.51 | 14.21 | 0.213 | 0.75% | 0.20% | 0.00% | 79.80% |
+| ar-en | ar->en | 50,000 | 2,000 | native_fast | 4.56 | 4.45 | 18.96 | 0.168 | 0.45% | 0.15% | 0.00% | 87.55% |
 
 Interpretation: lower TM-BLEU and lower PairLeak suggest that this capped
 training subset does not make the test split easy to solve by source-side

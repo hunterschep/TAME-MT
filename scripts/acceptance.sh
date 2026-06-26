@@ -12,6 +12,11 @@ cargo test
 pytest
 
 python benchmarks/bench_synthetic.py --small --assert-thresholds
+python benchmarks/bench_synthetic.py \
+  --train-size 100000 \
+  --test-size 2000 \
+  --max-seconds 30 \
+  --assert-thresholds
 
 rm -rf build dist src/tame_mt.egg-info
 python -m build

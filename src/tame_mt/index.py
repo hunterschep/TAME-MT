@@ -278,6 +278,25 @@ class NgramInvertedIndex:
         query_grams = char_ngrams(query_norm, self.sim_config.ngram_orders)
         return jaccard(query_grams, self.gram_sets[index])
 
+    def score_candidates(self, text: str, indices: list[int]) -> dict[int, float]:
+        if not indices:
+            return {}
+        query_norm = normalize_text(text, self.norm_config)
+        if self._native_index is not None:
+            return {
+                int(index): float(score)
+                for index, score in self._native_index.score_candidates(query_norm, indices)
+            }
+        if self.gram_sets is None:
+            raise BackendError("python gram sets are not available for this index")
+        query_grams = char_ngrams(query_norm, self.sim_config.ngram_orders)
+        scores: dict[int, float] = {}
+        for index in indices:
+            if index < 0 or index >= len(self.gram_sets):
+                raise IndexError(f"candidate index out of range: {index}")
+            scores[index] = jaccard(query_grams, self.gram_sets[index])
+        return scores
+
     def normalized(self, text: str) -> str:
         return normalize_text(text, self.norm_config)
 

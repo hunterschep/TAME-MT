@@ -39,9 +39,9 @@ python -m twine check dist/*
 ## Semantics
 
 Python owns normalization and report generation. The native layer receives
-already-normalized strings, builds character n-gram postings, and returns
-deterministically sorted nearest-neighbor results. Ties are resolved by lower
-training index.
+already-normalized strings, interns character n-grams into compact integer IDs,
+builds integer postings, and returns deterministically sorted nearest-neighbor
+results. Ties are resolved by lower training index.
 
 `native_exact` preserves exact nearest-neighbor retrieval over candidates that
 share query n-grams. `native_fast` is approximate because it bounds rare-gram
@@ -51,3 +51,8 @@ the resolved backend.
 Corpus-level batch queries release the Python GIL and use Rayon for parallel
 query execution inside Rust. Python still owns file IO, SacreBLEU scoring, JSON
 serialization, and report formatting.
+
+Pair exposure uses bulk candidate scoring: each source/reference query is
+featurized once, then scored against the candidate ID set. This avoids the
+per-candidate n-gram regeneration that makes pure Python nearest-neighbor loops
+slow at corpus scale.

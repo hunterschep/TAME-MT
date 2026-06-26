@@ -1,16 +1,18 @@
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 type NeighborTuple = (Option<usize>, f64, bool);
+type GramId = u32;
+type DocId = u32;
 
 #[pyclass]
 struct NativeNgramIndex {
-    normalized_lines: Vec<String>,
-    gram_sets: Vec<Vec<String>>,
+    gram_sets: Vec<Vec<GramId>>,
     gram_counts: Vec<usize>,
-    postings: HashMap<String, Vec<usize>>,
+    postings: Vec<Vec<DocId>>,
+    gram_to_id: HashMap<String, GramId>,
     exact_map: HashMap<String, usize>,
     ngram_orders: Vec<usize>,
     mode: String,
@@ -60,30 +62,56 @@ impl NativeNgramIndex {
             ));
         }
 
-        let mut gram_sets: Vec<Vec<String>> = Vec::with_capacity(normalized_lines.len());
+        if normalized_lines.len() > DocId::MAX as usize {
+            return Err(PyValueError::new_err(format!(
+                "native backend supports at most {} training segments",
+                DocId::MAX
+            )));
+        }
+
+        let mut gram_sets: Vec<Vec<GramId>> = Vec::with_capacity(normalized_lines.len());
         let mut gram_counts: Vec<usize> = Vec::with_capacity(normalized_lines.len());
-        let mut postings: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut postings: Vec<Vec<DocId>> = Vec::new();
+        let mut gram_to_id: HashMap<String, GramId> = HashMap::new();
         let mut exact_map: HashMap<String, usize> = HashMap::new();
 
         for (idx, line) in normalized_lines.iter().enumerate() {
             exact_map.entry(line.clone()).or_insert(idx);
             let grams = char_ngrams(line, &ngram_orders);
-            gram_counts.push(grams.len());
-            for gram in &grams {
-                postings.entry(gram.clone()).or_default().push(idx);
+            let mut doc_grams: Vec<GramId> = Vec::with_capacity(grams.len());
+            for gram in grams {
+                let gram_id = if let Some(gram_id) = gram_to_id.get(&gram) {
+                    *gram_id
+                } else {
+                    let next_id = postings.len();
+                    if next_id > GramId::MAX as usize {
+                        return Err(PyValueError::new_err(format!(
+                            "native backend supports at most {} unique n-grams",
+                            GramId::MAX
+                        )));
+                    }
+                    let gram_id = next_id as GramId;
+                    gram_to_id.insert(gram, gram_id);
+                    postings.push(Vec::new());
+                    gram_id
+                };
+                doc_grams.push(gram_id);
+                postings[gram_id as usize].push(idx as DocId);
             }
-            gram_sets.push(grams);
+            doc_grams.sort_unstable();
+            gram_counts.push(doc_grams.len());
+            gram_sets.push(doc_grams);
         }
 
-        for indices in postings.values_mut() {
+        for indices in postings.iter_mut() {
             indices.sort_unstable();
         }
 
         Ok(Self {
-            normalized_lines,
             gram_sets,
             gram_counts,
             postings,
+            gram_to_id,
             exact_map,
             ngram_orders,
             mode,
@@ -124,7 +152,30 @@ impl NativeNgramIndex {
             )));
         }
         let query_grams = char_ngrams(query_norm, &self.ngram_orders);
-        Ok(jaccard_sorted(&query_grams, &self.gram_sets[index]))
+        let (query_count, query_ids) = self.query_gram_ids_from_grams(query_grams);
+        Ok(jaccard_ids(query_count, &query_ids, &self.gram_sets[index]))
+    }
+
+    fn score_candidates(
+        &self,
+        query_norm: &str,
+        indices: Vec<usize>,
+    ) -> PyResult<Vec<(usize, f64)>> {
+        let query_grams = char_ngrams(query_norm, &self.ngram_orders);
+        let (query_count, query_ids) = self.query_gram_ids_from_grams(query_grams);
+        let mut scores = Vec::with_capacity(indices.len());
+        for index in indices {
+            if index >= self.gram_sets.len() {
+                return Err(PyIndexError::new_err(format!(
+                    "candidate index out of range: {index}"
+                )));
+            }
+            scores.push((
+                index,
+                jaccard_ids(query_count, &query_ids, &self.gram_sets[index]),
+            ));
+        }
+        Ok(scores)
     }
 }
 
@@ -134,53 +185,58 @@ impl NativeNgramIndex {
             return Vec::new();
         }
 
-        let query_grams = char_ngrams(query_norm, &self.ngram_orders);
-        if query_grams.is_empty() {
-            if let Some(index) = self.exact_map.get(query_norm) {
-                return vec![(Some(*index), 1.0, true)];
-            }
-            return Vec::new();
-        }
-
         if let Some(index) = self.exact_map.get(query_norm) {
             return vec![(Some(*index), 1.0, true)];
         }
 
+        let query_grams = char_ngrams(query_norm, &self.ngram_orders);
+        let (query_count, query_ids) = self.query_gram_ids_from_grams(query_grams);
+        if query_count == 0 || query_ids.is_empty() {
+            return Vec::new();
+        }
+
         let intersection_counts = if self.mode == "fast" {
-            self.candidate_counts_fast(&query_grams)
+            self.candidate_counts_fast(&query_ids)
         } else {
-            self.candidate_counts_exact(&query_grams)
+            self.candidate_counts_exact(&query_ids)
         };
-        self.rank_candidates(query_norm, &query_grams, intersection_counts, k)
+        self.rank_candidates(query_count, &query_ids, intersection_counts, k)
     }
 
-    fn candidate_counts_exact(&self, query_grams: &[String]) -> HashMap<usize, usize> {
+    fn query_gram_ids_from_grams(&self, grams: Vec<String>) -> (usize, Vec<GramId>) {
+        let query_count = grams.len();
+        let mut query_ids: Vec<GramId> = grams
+            .iter()
+            .filter_map(|gram| self.gram_to_id.get(gram).copied())
+            .collect();
+        query_ids.sort_unstable();
+        (query_count, query_ids)
+    }
+
+    fn candidate_counts_exact(&self, query_ids: &[GramId]) -> HashMap<usize, usize> {
         let mut counts: HashMap<usize, usize> = HashMap::new();
-        for gram in query_grams {
-            if let Some(indices) = self.postings.get(gram) {
-                for index in indices {
-                    *counts.entry(*index).or_insert(0) += 1;
-                }
+        for gram_id in query_ids {
+            for index in &self.postings[*gram_id as usize] {
+                *counts.entry(*index as usize).or_insert(0) += 1;
             }
         }
         counts
     }
 
-    fn candidate_counts_fast(&self, query_grams: &[String]) -> HashMap<usize, usize> {
-        let mut ranked_grams: Vec<(usize, &String)> = query_grams
+    fn candidate_counts_fast(&self, query_ids: &[GramId]) -> HashMap<usize, usize> {
+        let mut ranked_grams: Vec<(usize, GramId)> = query_ids
             .iter()
-            .map(|gram| {
-                let posting_count = self.postings.get(gram).map_or(0, Vec::len);
-                (posting_count, gram)
-            })
+            .map(|gram_id| (self.postings[*gram_id as usize].len(), *gram_id))
             .collect();
-        ranked_grams.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(right.1)));
+        ranked_grams.sort_unstable_by(|left, right| {
+            left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1))
+        });
 
-        let mut selected: Vec<&String> = ranked_grams
+        let mut selected: Vec<GramId> = ranked_grams
             .iter()
-            .filter_map(|(posting_count, gram)| {
+            .filter_map(|(posting_count, gram_id)| {
                 if *posting_count > 0 && *posting_count <= self.posting_limit {
-                    Some(*gram)
+                    Some(*gram_id)
                 } else {
                     None
                 }
@@ -191,9 +247,9 @@ impl NativeNgramIndex {
         if selected.is_empty() {
             selected = ranked_grams
                 .iter()
-                .filter_map(|(posting_count, gram)| {
+                .filter_map(|(posting_count, gram_id)| {
                     if *posting_count > 0 {
-                        Some(*gram)
+                        Some(*gram_id)
                     } else {
                         None
                     }
@@ -203,13 +259,14 @@ impl NativeNgramIndex {
         }
 
         let mut counts: HashMap<usize, usize> = HashMap::new();
-        for gram in selected {
-            if let Some(indices) = self.postings.get(gram) {
-                for index in indices.iter().take(self.posting_limit) {
-                    *counts.entry(*index).or_insert(0) += 1;
-                    if counts.len() >= self.max_candidates {
-                        break;
-                    }
+        for gram_id in selected {
+            for index in self.postings[gram_id as usize]
+                .iter()
+                .take(self.posting_limit)
+            {
+                *counts.entry(*index as usize).or_insert(0) += 1;
+                if counts.len() >= self.max_candidates {
+                    break;
                 }
             }
             if counts.len() >= self.max_candidates {
@@ -230,27 +287,23 @@ impl NativeNgramIndex {
 
     fn rank_candidates(
         &self,
-        query_norm: &str,
-        query_grams: &[String],
+        query_count: usize,
+        query_ids: &[GramId],
         intersection_counts: HashMap<usize, usize>,
         k: usize,
     ) -> Vec<NeighborTuple> {
         let mut results: Vec<NeighborTuple> = Vec::with_capacity(intersection_counts.len());
         for index in intersection_counts.keys() {
             let candidate_grams = &self.gram_sets[*index];
-            let intersection = intersection_size_sorted(query_grams, candidate_grams);
-            let union = query_grams.len() + self.gram_counts[*index] - intersection;
+            let intersection = intersection_size_ids(query_ids, candidate_grams);
+            let union = query_count + self.gram_counts[*index] - intersection;
             let score = if union == 0 {
                 1.0
             } else {
                 intersection as f64 / union as f64
             };
             if score > 0.0 {
-                results.push((
-                    Some(*index),
-                    score,
-                    self.normalized_lines[*index] == query_norm,
-                ));
+                results.push((Some(*index), score, false));
             }
         }
         results.sort_unstable_by(|left, right| {
@@ -288,33 +341,33 @@ fn char_ngrams(text: &str, orders: &[usize]) -> Vec<String> {
         return vec![text.to_string()];
     }
 
-    let mut grams: HashSet<String> = HashSet::new();
+    let mut grams: Vec<String> = Vec::new();
     for order in orders {
         if *order <= chars.len() {
             for start in 0..=(chars.len() - *order) {
-                grams.insert(chars[start..start + *order].iter().collect());
+                grams.push(chars[start..start + *order].iter().collect());
             }
         }
     }
 
-    let mut sorted: Vec<String> = grams.into_iter().collect();
-    sorted.sort_unstable();
-    sorted
+    grams.sort_unstable();
+    grams.dedup();
+    grams
 }
 
-fn jaccard_sorted(left: &[String], right: &[String]) -> f64 {
-    if left.is_empty() && right.is_empty() {
+fn jaccard_ids(query_count: usize, query_ids: &[GramId], candidate: &[GramId]) -> f64 {
+    if query_count == 0 && candidate.is_empty() {
         return 1.0;
     }
-    if left.is_empty() || right.is_empty() {
+    if query_count == 0 || candidate.is_empty() {
         return 0.0;
     }
-    let intersection = intersection_size_sorted(left, right);
-    let union = left.len() + right.len() - intersection;
+    let intersection = intersection_size_ids(query_ids, candidate);
+    let union = query_count + candidate.len() - intersection;
     intersection as f64 / union as f64
 }
 
-fn intersection_size_sorted(left: &[String], right: &[String]) -> usize {
+fn intersection_size_ids(left: &[GramId], right: &[GramId]) -> usize {
     let mut i = 0;
     let mut j = 0;
     let mut count = 0;
@@ -334,7 +387,7 @@ fn intersection_size_sorted(left: &[String], right: &[String]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{char_ngrams, jaccard_sorted};
+    use super::{char_ngrams, jaccard_ids};
 
     #[test]
     fn char_ngrams_short_text_matches_python_semantics() {
@@ -343,8 +396,8 @@ mod tests {
 
     #[test]
     fn jaccard_handles_empty_sets() {
-        let empty: Vec<String> = Vec::new();
-        assert_eq!(jaccard_sorted(&empty, &empty), 1.0);
-        assert_eq!(jaccard_sorted(&empty, &char_ngrams("abc", &[3])), 0.0);
+        let empty: Vec<u32> = Vec::new();
+        assert_eq!(jaccard_ids(0, &empty, &empty), 1.0);
+        assert_eq!(jaccard_ids(0, &empty, &[1]), 0.0);
     }
 }

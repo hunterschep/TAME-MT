@@ -69,3 +69,15 @@ def test_native_exact_matches_python_exact_when_available() -> None:
     assert native_index.batch_query_topk([query, "नमस्ते दुनिया"], 2) == python_index.batch_query_topk(
         [query, "नमस्ते दुनिया"], 2
     )
+    assert native_index.score_candidates(query, [0, 1, 2, 3]) == python_index.score_candidates(
+        query, [0, 1, 2, 3]
+    )
+
+
+def test_score_candidates_matches_single_candidate_scoring() -> None:
+    lines = ["abcdef", "uvwxyz", "abcxyz"]
+    index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="python_exact"))
+    indices = [0, 1, 2]
+    bulk_scores = index.score_candidates("abcdeg", indices)
+    single_scores = {idx: index.score_candidate("abcdeg", idx) for idx in indices}
+    assert bulk_scores == single_scores
