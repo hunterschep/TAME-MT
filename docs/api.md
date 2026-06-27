@@ -144,10 +144,12 @@ config = ScoreConfig(
 Metric-changing configuration and the resolved retrieval backend are recorded in
 the report signature.
 
-Configuration dataclasses validate both type and value at construction time.
-Integer settings reject booleans and floats, exposure thresholds must be finite
-numbers in \([0, 1]\), and invalid values raise `ConfigurationError` before any
-corpus work starts.
+Configuration dataclasses validate both structure and scalar values at
+construction time. Integer settings reject booleans and floats, boolean flags
+must be real booleans, exposure thresholds must be finite numbers in \([0, 1]\),
+Unicode normalization must be one of the supported forms, nested config objects
+must be the expected dataclass types, and invalid values raise
+`ConfigurationError` before any corpus work starts.
 
 ## Exceptions
 

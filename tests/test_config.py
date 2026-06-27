@@ -1,6 +1,13 @@
 import pytest
 
-from tame_mt import BinConfig, IndexConfig, ScoreConfig, SimilarityConfig, TMConfig
+from tame_mt import (
+    BinConfig,
+    IndexConfig,
+    NormalizationConfig,
+    ScoreConfig,
+    SimilarityConfig,
+    TMConfig,
+)
 from tame_mt.config import MetricConfig, parse_float_tuple, parse_int_tuple
 from tame_mt.exceptions import ConfigurationError
 
@@ -8,6 +15,10 @@ from tame_mt.exceptions import ConfigurationError
 def test_config_rejects_invalid_metric() -> None:
     with pytest.raises(ConfigurationError, match="unsupported metrics"):
         ScoreConfig(metrics=("bleu", "meteor"))
+    with pytest.raises(ConfigurationError, match="sequence"):
+        ScoreConfig(metrics="bleu")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="metric names"):
+        ScoreConfig(metrics=(1,))  # type: ignore[arg-type]
 
 
 def test_config_normalizes_metric_case() -> None:
@@ -31,6 +42,8 @@ def test_config_rejects_invalid_thresholds() -> None:
         BinConfig(leak_thresholds=(0.7, 1.01))
     with pytest.raises(ConfigurationError, match="leak_thresholds"):
         BinConfig(leak_thresholds=())
+    with pytest.raises(ConfigurationError, match="leak_thresholds"):
+        BinConfig(leak_thresholds=[0.7])  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="far_threshold"):
         BinConfig(far_threshold=True, near_threshold=1.0)
     with pytest.raises(ConfigurationError, match="far_threshold"):
@@ -66,8 +79,12 @@ def test_config_rejects_invalid_index_and_tm_options() -> None:
         IndexConfig(max_candidates=100, rerank_limit=101)
     with pytest.raises(ConfigurationError, match="zero_policy"):
         TMConfig(zero_policy="random")
+    with pytest.raises(ConfigurationError, match="zero_policy"):
+        TMConfig(zero_policy=1)  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="positive"):
         SimilarityConfig(ngram_orders=(0,))
+    with pytest.raises(ConfigurationError, match="ngram_orders"):
+        SimilarityConfig(ngram_orders=[3])  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="ngram_orders"):
         SimilarityConfig(ngram_orders=(True,))
     with pytest.raises(ConfigurationError, match="ngram_orders"):
@@ -83,3 +100,34 @@ def test_config_rejects_invalid_integer_typed_options() -> None:
         MetricConfig(chrf_word_order=False)
     with pytest.raises(ConfigurationError, match="chrf_word_order"):
         MetricConfig(chrf_word_order=1.5)  # type: ignore[arg-type]
+
+
+def test_config_rejects_invalid_normalization_options() -> None:
+    with pytest.raises(ConfigurationError, match="unicode_form"):
+        NormalizationConfig(unicode_form="BAD")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="strip"):
+        NormalizationConfig(strip="yes")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="lowercase"):
+        NormalizationConfig(lowercase=1)  # type: ignore[arg-type]
+
+
+def test_config_rejects_invalid_metric_options() -> None:
+    with pytest.raises(ConfigurationError, match="bleu_tokenize"):
+        MetricConfig(bleu_tokenize=13)  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="bleu_lowercase"):
+        MetricConfig(bleu_lowercase="yes")  # type: ignore[arg-type]
+
+
+def test_score_config_rejects_wrong_nested_config_types() -> None:
+    with pytest.raises(ConfigurationError, match="normalization"):
+        ScoreConfig(normalization="bad")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="similarity"):
+        ScoreConfig(similarity="bad")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="index"):
+        ScoreConfig(index="bad")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="bins"):
+        ScoreConfig(bins="bad")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="tm"):
+        ScoreConfig(tm="bad")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="metric"):
+        ScoreConfig(metric="bad")  # type: ignore[arg-type]

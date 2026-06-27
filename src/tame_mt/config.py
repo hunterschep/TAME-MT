@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import Literal
@@ -18,6 +19,15 @@ class NormalizationConfig:
     strip_diacritics: bool = False
     normalize_punctuation: bool = False
 
+    def __post_init__(self) -> None:
+        if self.unicode_form not in {"NFC", "NFD", "NFKC", "NFKD"}:
+            raise ConfigurationError("unicode_form must be one of: NFC, NFD, NFKC, NFKD")
+        _require_bool("strip", self.strip)
+        _require_bool("collapse_whitespace", self.collapse_whitespace)
+        _require_bool("lowercase", self.lowercase)
+        _require_bool("strip_diacritics", self.strip_diacritics)
+        _require_bool("normalize_punctuation", self.normalize_punctuation)
+
 
 @dataclass(frozen=True)
 class SimilarityConfig:
@@ -25,6 +35,8 @@ class SimilarityConfig:
     similarity: str = "jaccard_set"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.ngram_orders, tuple):
+            raise ConfigurationError("ngram_orders must be a tuple of positive integers")
         if not self.ngram_orders:
             raise ConfigurationError("ngram_orders must contain at least one order")
         for order in self.ngram_orders:
@@ -44,6 +56,8 @@ class IndexConfig:
     rerank_limit: int = 1_000
 
     def __post_init__(self) -> None:
+        if not isinstance(self.mode, str):
+            raise ConfigurationError("index mode must be a string")
         valid_modes = {
             "auto",
             "inverted_exact",
@@ -78,6 +92,8 @@ class BinConfig:
     def __post_init__(self) -> None:
         _require_unit_interval("far_threshold", self.far_threshold)
         _require_unit_interval("near_threshold", self.near_threshold)
+        if not isinstance(self.leak_thresholds, tuple):
+            raise ConfigurationError("leak_thresholds must be a tuple of thresholds")
         if not self.leak_thresholds:
             raise ConfigurationError("leak_thresholds must contain at least one threshold")
         for threshold in self.leak_thresholds:
@@ -92,6 +108,8 @@ class TMConfig:
     zero_policy: str = "empty"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.zero_policy, str):
+            raise ConfigurationError("tm zero_policy must be 'empty' or 'nearest'")
         if self.zero_policy not in {"empty", "nearest"}:
             raise ConfigurationError("tm zero_policy must be 'empty' or 'nearest'")
 
@@ -103,6 +121,9 @@ class MetricConfig:
     chrf_word_order: int = 2
 
     def __post_init__(self) -> None:
+        if not isinstance(self.bleu_tokenize, str):
+            raise ConfigurationError("bleu_tokenize must be a string")
+        _require_bool("bleu_lowercase", self.bleu_lowercase)
         _require_non_negative_int("chrf_word_order", self.chrf_word_order)
 
 
@@ -117,13 +138,26 @@ class ScoreConfig:
     metric: MetricConfig = field(default_factory=MetricConfig)
 
     def __post_init__(self) -> None:
-        normalized_metrics = tuple(metric.lower() for metric in self.metrics)
-        if not normalized_metrics:
+        _require_config_type("normalization", self.normalization, NormalizationConfig)
+        _require_config_type("similarity", self.similarity, SimilarityConfig)
+        _require_config_type("index", self.index, IndexConfig)
+        _require_config_type("bins", self.bins, BinConfig)
+        _require_config_type("tm", self.tm, TMConfig)
+        _require_config_type("metric", self.metric, MetricConfig)
+        if isinstance(self.metrics, str) or not isinstance(self.metrics, Iterable):
+            raise ConfigurationError("metrics must be a sequence of metric names")
+        normalized_metrics: list[str] = []
+        for metric in self.metrics:
+            if not isinstance(metric, str):
+                raise ConfigurationError("metrics must contain only metric names")
+            normalized_metrics.append(metric.lower())
+        normalized_metrics_tuple = tuple(normalized_metrics)
+        if not normalized_metrics_tuple:
             raise ConfigurationError("at least one metric must be selected")
-        unsupported = sorted(set(normalized_metrics) - set(SUPPORTED_METRICS))
+        unsupported = sorted(set(normalized_metrics_tuple) - set(SUPPORTED_METRICS))
         if unsupported:
             raise ConfigurationError(f"unsupported metrics: {', '.join(unsupported)}")
-        object.__setattr__(self, "metrics", normalized_metrics)
+        object.__setattr__(self, "metrics", normalized_metrics_tuple)
 
 
 def parse_float_tuple(value: str) -> tuple[float, ...]:
@@ -163,6 +197,11 @@ def _require_finite(name: str, value: float) -> None:
         raise ConfigurationError(f"{name} must be a finite number")
 
 
+def _require_bool(name: str, value: object) -> None:
+    if not isinstance(value, bool):
+        raise ConfigurationError(f"{name} must be a boolean")
+
+
 def _require_unit_interval(name: str, value: float) -> None:
     _require_finite(name, value)
     if value < 0 or value > 1:
@@ -185,3 +224,8 @@ def _require_non_negative_int(name: str, value: object) -> None:
     parsed = _require_int(name, value)
     if parsed < 0:
         raise ConfigurationError(f"{name} must be non-negative")
+
+
+def _require_config_type(name: str, value: object, expected_type: type[object]) -> None:
+    if not isinstance(value, expected_type):
+        raise ConfigurationError(f"{name} must be a {expected_type.__name__}")
