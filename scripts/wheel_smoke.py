@@ -8,10 +8,26 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tame_mt import CachedSegmentScorer, TameScorer, read_segment_jsonl
+from tame_mt import (
+    CachedSegmentScorer,
+    ScoreConfig,
+    TameScorer,
+    read_segment_jsonl,
+    read_segment_metadata,
+    validate_segment_metadata,
+)
+from tame_mt.native import native_status
 
 
 def main() -> int:
+    status = native_status()
+    if not status.available:
+        raise SystemExit(
+            "wheel smoke requires the native backend. Install a built wheel or run "
+            "`python -m pip install -e '.[dev]'` before running this script directly. "
+            f"Native status: {status.error}"
+        )
+
     project = Path(__file__).resolve().parents[1]
     fixtures = project / "tests" / "fixtures"
     with tempfile.TemporaryDirectory(prefix="tame-mt-wheel-smoke-") as tmpdir:
@@ -128,6 +144,16 @@ def main() -> int:
         batch_baseline = _read_json(tmp / "batch_reports" / "baseline.json")
         batch_variant = _read_json(tmp / "batch_reports" / "variant.json")
         exposures, tm_results = read_segment_jsonl(tmp / "segments.jsonl.gz")
+        metadata = read_segment_metadata(tmp / "segments.jsonl.gz")
+        if metadata is None:
+            raise SystemExit("segment metadata sidecar was not written")
+        validate_segment_metadata(
+            metadata,
+            config=ScoreConfig(),
+            num_train=4,
+            num_test=len(exposures),
+            num_refs=1,
+        )
         prepared = TameScorer().prepare_from_artifacts(
             exposures=exposures,
             tm_results=tm_results,
