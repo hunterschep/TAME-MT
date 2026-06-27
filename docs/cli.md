@@ -142,6 +142,10 @@ ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 --chrf-word-order 2
 ```
 
+Numeric options must be finite decimal values. `nan`, `inf`, and `-inf` are
+rejected because TAME-MT JSON outputs are strict JSON and never emit
+non-standard floating-point tokens.
+
 ## Doctor
 
 ```bash

@@ -95,7 +95,7 @@ def write_json_report(path: str | Path, report: TameReport) -> None:
     output_path = Path(path)
     ensure_parent_dir(output_path)
     with open_text(output_path, "w") as handle:
-        json.dump(report.to_dict(), handle, ensure_ascii=False, indent=2)
+        json.dump(report.to_dict(), handle, ensure_ascii=False, indent=2, allow_nan=False)
         handle.write("\n")
 
 
@@ -149,7 +149,7 @@ def write_segment_jsonl(
                 payload["neighbor_source_text"] = train_src[segment.source_nn_index]
                 if train_tgt is not None:
                     payload["neighbor_target_text"] = train_tgt[segment.source_nn_index]
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            handle.write(json.dumps(payload, ensure_ascii=False, allow_nan=False) + "\n")
 
 
 def _normalization_signature(config: ScoreConfig) -> str:

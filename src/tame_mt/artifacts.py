@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from math import isfinite
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -175,9 +176,12 @@ def _optional_float(value: object) -> float | None:
         raise InputDataError("expected float-compatible value, got bool")
     if isinstance(value, str | int | float):
         try:
-            return float(value)
+            parsed = float(value)
         except ValueError as exc:
             raise InputDataError(f"expected float-compatible value, got {value!r}") from exc
+        if not isfinite(parsed):
+            raise InputDataError("expected finite float-compatible value")
+        return parsed
     raise InputDataError(f"expected float-compatible value, got {type(value).__name__}")
 
 

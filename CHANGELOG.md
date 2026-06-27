@@ -33,6 +33,9 @@
   persisting normalized exact-pair keys for faster repeated audits.
 - Hardened cached segment artifact scoring with strict index validation,
   canonical ordering, and safer JSON type parsing.
+- Rejected non-finite numeric config and cached-artifact values and made JSON
+  report/segment writers fail closed instead of emitting non-standard `NaN` or
+  infinity values.
 - Improved malformed artifact and index-bundle errors so corrupt numeric fields,
   manifests, and UTF-8 members fail with user-facing TAME-MT exceptions.
 - Optimized cached and repeated scoring by aggregating SacreBLEU segment

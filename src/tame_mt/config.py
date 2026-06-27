@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Literal
 
 from tame_mt.exceptions import ConfigurationError
@@ -81,6 +82,10 @@ class BinConfig:
     min_bin_size_warning: int = 30
 
     def __post_init__(self) -> None:
+        _require_finite("far_threshold", self.far_threshold)
+        _require_finite("near_threshold", self.near_threshold)
+        for threshold in self.leak_thresholds:
+            _require_finite("leak_thresholds", threshold)
         if self.far_threshold < 0 or self.near_threshold < 0:
             raise ConfigurationError("bin thresholds must be non-negative")
         if self.far_threshold > self.near_threshold:
@@ -135,9 +140,12 @@ def parse_float_tuple(value: str) -> tuple[float, ...]:
     if not value:
         raise ConfigurationError("expected a comma-separated list of floats")
     try:
-        return tuple(float(part.strip()) for part in value.split(",") if part.strip())
+        parsed = tuple(float(part.strip()) for part in value.split(",") if part.strip())
     except ValueError as exc:
         raise ConfigurationError(f"invalid float list: {value!r}") from exc
+    for item in parsed:
+        _require_finite("float list", item)
+    return parsed
 
 
 def parse_int_tuple(value: str) -> tuple[int, ...]:
@@ -150,3 +158,8 @@ def parse_int_tuple(value: str) -> tuple[int, ...]:
     if not parsed or any(order <= 0 for order in parsed):
         raise ConfigurationError("ngram orders must be positive integers")
     return parsed
+
+
+def _require_finite(name: str, value: float) -> None:
+    if not isfinite(value):
+        raise ConfigurationError(f"{name} must be a finite number")

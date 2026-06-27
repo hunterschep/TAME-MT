@@ -127,3 +127,7 @@ Consumers should treat `index` as the authoritative original segment position.
 `score-cached` requires indices to be unique and contiguous from `0` to `N-1`
 and sorts valid rows by index before scoring. `--num-train` must be the positive
 training segment count used to create the segment diagnostics.
+
+All numeric JSON values are finite JSON numbers. Cached segment diagnostics with
+`NaN`, `Infinity`, or `-Infinity` numeric strings are rejected on read, and
+report writers use strict JSON serialization.

@@ -490,3 +490,31 @@ def test_cli_reports_configuration_errors(capsys) -> None:
     captured = capsys.readouterr()
     assert rc == 2
     assert "expected a comma-separated list of integers" in captured.err
+
+
+def test_cli_rejects_non_finite_thresholds(tmp_path: Path, capsys) -> None:
+    json_out = tmp_path / "report.json"
+    rc = main(
+        [
+            "score",
+            "--far-threshold",
+            "nan",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "finite number" in captured.err
+    assert not json_out.exists()

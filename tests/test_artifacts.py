@@ -92,6 +92,16 @@ def test_read_segment_jsonl_reports_invalid_optional_float(tmp_path: Path) -> No
         read_segment_jsonl(path)
 
 
+def test_read_segment_jsonl_rejects_non_finite_float(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["source_exposure"] = "nan"
+    _write_jsonl(path, [row])
+
+    with pytest.raises(InputDataError, match="finite float"):
+        read_segment_jsonl(path)
+
+
 def test_read_segment_jsonl_reports_invalid_required_index(tmp_path: Path) -> None:
     path = tmp_path / "segments.jsonl"
     row = _payload(0)

@@ -98,4 +98,4 @@ class TameReport:
         }
 
     def to_json(self, *, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, allow_nan=False)
