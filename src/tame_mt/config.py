@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import Literal
@@ -144,7 +144,7 @@ class ScoreConfig:
         _require_config_type("bins", self.bins, BinConfig)
         _require_config_type("tm", self.tm, TMConfig)
         _require_config_type("metric", self.metric, MetricConfig)
-        if isinstance(self.metrics, str) or not isinstance(self.metrics, Iterable):
+        if isinstance(self.metrics, str) or not isinstance(self.metrics, Sequence):
             raise ConfigurationError("metrics must be a sequence of metric names")
         normalized_metrics: list[str] = []
         for metric in self.metrics:
@@ -157,6 +157,9 @@ class ScoreConfig:
         unsupported = sorted(set(normalized_metrics_tuple) - set(SUPPORTED_METRICS))
         if unsupported:
             raise ConfigurationError(f"unsupported metrics: {', '.join(unsupported)}")
+        duplicates = _find_duplicates(normalized_metrics_tuple)
+        if duplicates:
+            raise ConfigurationError(f"duplicate metrics are not allowed: {', '.join(duplicates)}")
         object.__setattr__(self, "metrics", normalized_metrics_tuple)
 
 
@@ -229,3 +232,13 @@ def _require_non_negative_int(name: str, value: object) -> None:
 def _require_config_type(name: str, value: object, expected_type: type[object]) -> None:
     if not isinstance(value, expected_type):
         raise ConfigurationError(f"{name} must be a {expected_type.__name__}")
+
+
+def _find_duplicates(values: tuple[str, ...]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    return duplicates

@@ -46,6 +46,8 @@
 - Tightened Python API configuration validation so malformed numeric, boolean,
   metric-list, normalization, and nested config options raise
   `ConfigurationError` consistently.
+- Rejected unordered and duplicate metric selections in `ScoreConfig` so report
+  key order and signatures remain deterministic.
 - Centralized strict JSON parsing/serialization for package artifacts so
   cached segment JSONL and `.tameidx` manifests reject non-standard `NaN` and
   infinity constants and duplicate object keys even in ignored fields.

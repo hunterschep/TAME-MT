@@ -195,8 +195,9 @@ Configuration dataclasses validate both structure and scalar values at
 construction time. Integer settings reject booleans and floats, boolean flags
 must be real booleans, exposure thresholds must be finite numbers in \([0, 1]\),
 Unicode normalization must be one of the supported forms, nested config objects
-must be the expected dataclass types, and invalid values raise
-`ConfigurationError` before any corpus work starts.
+must be the expected dataclass types, and metrics must be an ordered sequence
+with no duplicates. Invalid values raise `ConfigurationError` before any corpus
+work starts.
 
 ## Exceptions
 

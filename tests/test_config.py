@@ -17,12 +17,17 @@ def test_config_rejects_invalid_metric() -> None:
         ScoreConfig(metrics=("bleu", "meteor"))
     with pytest.raises(ConfigurationError, match="sequence"):
         ScoreConfig(metrics="bleu")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="sequence"):
+        ScoreConfig(metrics={"bleu", "chrf"})  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="metric names"):
         ScoreConfig(metrics=(1,))  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="duplicate metrics"):
+        ScoreConfig(metrics=("bleu", "BLEU"))
 
 
 def test_config_normalizes_metric_case() -> None:
     assert ScoreConfig(metrics=("BLEU", "chrF")).metrics == ("bleu", "chrf")
+    assert ScoreConfig(metrics=["BLEU"]).metrics == ("bleu",)  # type: ignore[arg-type]
 
 
 def test_config_rejects_invalid_thresholds() -> None:
