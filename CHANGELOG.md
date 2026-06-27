@@ -19,6 +19,8 @@
 - Added persistent `.tameidx` native index bundles plus `tame-mt index build`,
   `tame-mt index inspect`, and `score`/`audit --index` reuse workflows for
   large training corpora.
+- Added explicit `.tameidx` bundle and native index schema versioning so
+  incompatible persisted indexes fail with clear rebuild guidance.
 - Optimized native index reuse by avoiding duplicate Python exact maps and by
   persisting normalized exact-pair keys for faster repeated audits.
 - Hardened cached segment artifact scoring with strict index validation,

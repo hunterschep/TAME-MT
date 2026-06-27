@@ -79,6 +79,9 @@ tame-mt index inspect train.tameidx
 
 Index bundles store raw training text and normalized exact-match and pair keys.
 Protect them with the same access controls as the original training corpus.
+If `score --index` or `audit --index` reports an unsupported bundle or native
+schema version after an upgrade, rebuild the `.tameidx` file with the current
+`tame-mt index build` command.
 
 For large corpora or repeated system comparisons, cache segment diagnostics once:
 

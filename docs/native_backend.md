@@ -86,6 +86,11 @@ files. The bundle also stores raw training lines so TM outputs, exact pair
 overlap, and optional neighbor-text segment reports remain identical to a fresh
 run.
 
+Bundles record both the outer `.tameidx` format version and the private native
+index schema version. If either version is unsupported, TAME-MT rejects the
+bundle before deserializing native bytes. Rebuild the index with the current
+`tame-mt index build` command after native-index upgrades.
+
 Bundles are uncompressed zip containers by default. This favors load speed over
 minimum disk size. Because they contain raw training text and normalized
 exact-match and pair keys, they should be handled as training data.

@@ -7,7 +7,13 @@ import pytest
 from tame_mt.api import TameScorer
 from tame_mt.config import IndexConfig, ScoreConfig
 from tame_mt.exceptions import ConfigurationError
-from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
+from tame_mt.persistence import (
+    FORMAT_VERSION,
+    NATIVE_INDEX_SCHEMA_VERSION,
+    inspect_index_bundle,
+    load_index_bundle,
+    save_index_bundle,
+)
 
 
 def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
@@ -29,6 +35,8 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     assert loaded.target_index.normalized_lines == []
     assert loaded.exact_pair_keys is not None
     assert manifest["format"] == "tameidx"
+    assert manifest["format_version"] == FORMAT_VERSION
+    assert manifest["storage"]["native_index_schema_version"] == NATIVE_INDEX_SCHEMA_VERSION
     assert manifest["privacy"]["stores_raw_training_text"] is True
     assert manifest["privacy"]["stores_normalized_pair_keys"] is True
 
@@ -96,3 +104,64 @@ def test_load_index_bundle_reports_invalid_num_train_manifest(tmp_path: Path) ->
 
     with pytest.raises(ConfigurationError, match="num_train must be an integer"):
         load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_unsupported_format_version(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    _copy_bundle_with_manifest_override(
+        path,
+        bad_path,
+        {"format_version": FORMAT_VERSION - 1},
+    )
+
+    with pytest.raises(ConfigurationError, match="unsupported index bundle format version"):
+        load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_unsupported_native_schema(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    _copy_bundle_with_manifest_override(
+        path,
+        bad_path,
+        {"storage": {"native_index_schema_version": NATIVE_INDEX_SCHEMA_VERSION - 1}},
+    )
+
+    with pytest.raises(ConfigurationError, match="unsupported native index schema version"):
+        load_index_bundle(bad_path, config)
+
+
+def _copy_bundle_with_manifest_override(
+    source_path: Path,
+    target_path: Path,
+    overrides: dict[str, object],
+) -> None:
+    with zipfile.ZipFile(source_path, "r") as source, zipfile.ZipFile(target_path, "w") as target:
+        manifest = json.loads(source.read("manifest.json").decode("utf-8"))
+        _merge_manifest_overrides(manifest, overrides)
+        for item in source.infolist():
+            if item.filename == "manifest.json":
+                target.writestr(item, json.dumps(manifest))
+            else:
+                target.writestr(item, source.read(item.filename))
+
+
+def _merge_manifest_overrides(
+    manifest: dict[str, object],
+    overrides: dict[str, object],
+) -> None:
+    for key, value in overrides.items():
+        existing = manifest.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _merge_manifest_overrides(existing, value)
+        else:
+            manifest[key] = value

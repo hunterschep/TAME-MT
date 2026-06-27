@@ -16,7 +16,8 @@ from tame_mt.report import config_to_dict
 from tame_mt.version import __version__
 
 INDEX_FORMAT = "tameidx"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+NATIVE_INDEX_SCHEMA_VERSION = 2
 
 MANIFEST_NAME = "manifest.json"
 TRAIN_SRC_NAME = "train.src"
@@ -212,6 +213,7 @@ def _build_manifest(
         "storage": {
             "container": "zip",
             "compression": "stored",
+            "native_index_schema_version": NATIVE_INDEX_SCHEMA_VERSION,
             "source_index_bytes": len(source_index_bytes),
             "target_index_bytes": len(target_index_bytes) if target_index_bytes is not None else 0,
             "exact_pair_keys_bytes": (
@@ -253,7 +255,16 @@ def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
         raise ConfigurationError("not a TAME-MT index bundle")
     if manifest.get("format_version") != FORMAT_VERSION:
         raise ConfigurationError(
-            f"unsupported index bundle format version: {manifest.get('format_version')}"
+            "unsupported index bundle format version: "
+            f"{manifest.get('format_version')}; rebuild the .tameidx file with the current "
+            "TAME-MT version"
+        )
+    storage = _storage_manifest(manifest)
+    if storage.get("native_index_schema_version") != NATIVE_INDEX_SCHEMA_VERSION:
+        raise ConfigurationError(
+            "unsupported native index schema version: "
+            f"{storage.get('native_index_schema_version')}; rebuild the .tameidx file with the "
+            "current TAME-MT version"
         )
 
     expected_normalization = _jsonable(asdict(config.normalization))
@@ -329,6 +340,13 @@ def _backend_manifest(manifest: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(backend, dict):
         raise ConfigurationError(f"index bundle manifest is missing {key}")
     return cast(dict[str, Any], backend)
+
+
+def _storage_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    storage = manifest.get("storage")
+    if not isinstance(storage, dict):
+        raise ConfigurationError("index bundle manifest is missing storage")
+    return cast(dict[str, Any], storage)
 
 
 def _read_lines_member(archive: zipfile.ZipFile, name: str) -> list[str]:
