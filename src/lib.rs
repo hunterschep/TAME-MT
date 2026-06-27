@@ -4,42 +4,13 @@ use pyo3::types::PyBytes;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
 
 type NeighborTuple = (Option<usize>, f64, bool);
 type GramId = u32;
 type DocId = u32;
-type GramToIdMap = HashMap<Vec<u8>, GramId, BuildHasherDefault<FnvHasher>>;
-type ExactMap = HashMap<String, usize, BuildHasherDefault<FnvHasher>>;
-type CandidateCountMap = HashMap<usize, usize, BuildHasherDefault<FnvHasher>>;
-
-const FNV_OFFSET_BASIS_64: u64 = 0xcbf29ce484222325;
-const FNV_PRIME_64: u64 = 0x00000100000001b3;
-
-struct FnvHasher {
-    hash: u64,
-}
-
-impl Default for FnvHasher {
-    fn default() -> Self {
-        Self {
-            hash: FNV_OFFSET_BASIS_64,
-        }
-    }
-}
-
-impl Hasher for FnvHasher {
-    fn finish(&self) -> u64 {
-        self.hash
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.hash ^= u64::from(*byte);
-            self.hash = self.hash.wrapping_mul(FNV_PRIME_64);
-        }
-    }
-}
+type GramToIdMap = HashMap<Vec<u8>, GramId>;
+type ExactMap = HashMap<String, usize>;
+type CandidateCountMap = HashMap<usize, usize>;
 
 #[pyclass]
 #[derive(Serialize, Deserialize)]
@@ -168,8 +139,10 @@ impl NativeNgramIndex {
 
     #[staticmethod]
     fn from_bytes(data: &[u8]) -> PyResult<Self> {
-        bincode::deserialize(data)
-            .map_err(|exc| PyValueError::new_err(format!("invalid native index bytes: {exc}")))
+        let index: Self = bincode::deserialize(data)
+            .map_err(|exc| PyValueError::new_err(format!("invalid native index bytes: {exc}")))?;
+        index.validate_invariants()?;
+        Ok(index)
     }
 
     fn save(&self, path: &str) -> PyResult<()> {
@@ -300,6 +273,129 @@ impl NativeNgramIndex {
 }
 
 impl NativeNgramIndex {
+    fn validate_invariants(&self) -> PyResult<()> {
+        if self.ngram_orders.is_empty() || self.ngram_orders.contains(&0) {
+            return Err(PyValueError::new_err(
+                "invalid native index: ngram_orders must contain positive integers",
+            ));
+        }
+        if self.mode != "exact" && self.mode != "fast" {
+            return Err(PyValueError::new_err(
+                "invalid native index: mode must be exact or fast",
+            ));
+        }
+        if self.candidate_gram_limit == 0
+            || self.posting_limit == 0
+            || self.max_candidates == 0
+            || self.rerank_limit == 0
+            || self.rerank_limit > self.max_candidates
+        {
+            return Err(PyValueError::new_err(
+                "invalid native index: fast-mode limits must be positive and rerank <= max_candidates",
+            ));
+        }
+        if self.gram_sets.len() > DocId::MAX as usize {
+            return Err(PyValueError::new_err(
+                "invalid native index: document count exceeds native limit",
+            ));
+        }
+        if self.postings.len() > GramId::MAX as usize {
+            return Err(PyValueError::new_err(
+                "invalid native index: n-gram count exceeds native limit",
+            ));
+        }
+        if self.gram_to_id.len() != self.postings.len() {
+            return Err(PyValueError::new_err(
+                "invalid native index: gram map and posting table sizes differ",
+            ));
+        }
+        if self.exact_map.len() > self.gram_sets.len() {
+            return Err(PyValueError::new_err(
+                "invalid native index: exact-match map is larger than document table",
+            ));
+        }
+
+        let mut seen_gram_ids = vec![false; self.postings.len()];
+        for (gram, gram_id) in &self.gram_to_id {
+            if gram.is_empty() {
+                return Err(PyValueError::new_err(
+                    "invalid native index: gram map contains an empty n-gram",
+                ));
+            }
+            let gram_index = *gram_id as usize;
+            if gram_index >= self.postings.len() {
+                return Err(PyValueError::new_err(
+                    "invalid native index: gram id points past posting table",
+                ));
+            }
+            if seen_gram_ids[gram_index] {
+                return Err(PyValueError::new_err(
+                    "invalid native index: duplicate gram id in gram map",
+                ));
+            }
+            seen_gram_ids[gram_index] = true;
+        }
+        if seen_gram_ids.iter().any(|seen| !seen) {
+            return Err(PyValueError::new_err(
+                "invalid native index: posting table contains an unmapped gram id",
+            ));
+        }
+
+        for index in self.exact_map.values() {
+            if *index >= self.gram_sets.len() {
+                return Err(PyValueError::new_err(
+                    "invalid native index: exact-match entry points past document table",
+                ));
+            }
+        }
+
+        let mut doc_gram_counts = vec![0_usize; self.postings.len()];
+        for doc_grams in &self.gram_sets {
+            if !is_strictly_increasing_u32(doc_grams) {
+                return Err(PyValueError::new_err(
+                    "invalid native index: document gram ids must be sorted and unique",
+                ));
+            }
+            for gram_id in doc_grams {
+                let gram_index = *gram_id as usize;
+                if gram_index >= self.postings.len() {
+                    return Err(PyValueError::new_err(
+                        "invalid native index: document gram id points past posting table",
+                    ));
+                }
+                doc_gram_counts[gram_index] += 1;
+            }
+        }
+
+        for (gram_index, posting) in self.postings.iter().enumerate() {
+            if !is_strictly_increasing_u32(posting) {
+                return Err(PyValueError::new_err(
+                    "invalid native index: postings must be sorted and unique",
+                ));
+            }
+            if posting.len() != doc_gram_counts[gram_index] {
+                return Err(PyValueError::new_err(
+                    "invalid native index: posting length does not match document gram count",
+                ));
+            }
+            let gram_id = gram_index as GramId;
+            for doc_id in posting {
+                let doc_index = *doc_id as usize;
+                if doc_index >= self.gram_sets.len() {
+                    return Err(PyValueError::new_err(
+                        "invalid native index: posting points past document table",
+                    ));
+                }
+                if self.gram_sets[doc_index].binary_search(&gram_id).is_err() {
+                    return Err(PyValueError::new_err(
+                        "invalid native index: posting/document gram cross-reference is inconsistent",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn best_pair_candidate_impl(
         &self,
         target_index: &NativeNgramIndex,
@@ -563,9 +659,34 @@ fn intersection_size_ids(left: &[GramId], right: &[GramId]) -> usize {
     count
 }
 
+fn is_strictly_increasing_u32(values: &[u32]) -> bool {
+    values.windows(2).all(|items| items[0] < items[1])
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{char_ngram_slices, jaccard_ids};
+    use super::{char_ngram_slices, jaccard_ids, NativeNgramIndex};
+
+    fn valid_native_index() -> NativeNgramIndex {
+        NativeNgramIndex::new(
+            vec!["abcdef".to_string(), "abcxyz".to_string()],
+            vec![3, 4, 5],
+            "exact".to_string(),
+            8,
+            500,
+            3_000,
+            1_000,
+        )
+        .unwrap()
+    }
+
+    fn load_error(payload: &[u8]) -> pyo3::PyErr {
+        pyo3::prepare_freethreaded_python();
+        match NativeNgramIndex::from_bytes(payload) {
+            Ok(_) => panic!("corrupt native index unexpectedly loaded"),
+            Err(err) => err,
+        }
+    }
 
     #[test]
     fn char_ngrams_short_text_matches_python_semantics() {
@@ -577,5 +698,66 @@ mod tests {
         let empty: Vec<u32> = Vec::new();
         assert_eq!(jaccard_ids(0, &empty, &empty), 1.0);
         assert_eq!(jaccard_ids(0, &empty, &[1]), 0.0);
+    }
+
+    #[test]
+    fn native_index_from_bytes_accepts_valid_roundtrip() {
+        let index = valid_native_index();
+        let payload = bincode::serialize(&index).unwrap();
+        let restored = NativeNgramIndex::from_bytes(&payload).unwrap();
+
+        assert_eq!(restored.doc_count(), index.doc_count());
+        assert_eq!(
+            restored.query_topk_impl("abcdeg", 2),
+            index.query_topk_impl("abcdeg", 2)
+        );
+    }
+
+    #[test]
+    fn native_index_from_bytes_rejects_out_of_range_gram_id() {
+        let mut index = valid_native_index();
+        let first_gram = index.gram_to_id.keys().next().unwrap().clone();
+        *index.gram_to_id.get_mut(&first_gram).unwrap() = 99;
+        let payload = bincode::serialize(&index).unwrap();
+
+        let err = load_error(&payload);
+
+        assert!(err
+            .to_string()
+            .contains("gram id points past posting table"));
+    }
+
+    #[test]
+    fn native_index_from_bytes_rejects_unsorted_doc_grams() {
+        let mut index = valid_native_index();
+        if index.gram_sets[0].len() < 2 {
+            panic!("test fixture must have at least two grams");
+        }
+        index.gram_sets[0].swap(0, 1);
+        let payload = bincode::serialize(&index).unwrap();
+
+        let err = load_error(&payload);
+
+        assert!(err
+            .to_string()
+            .contains("document gram ids must be sorted and unique"));
+    }
+
+    #[test]
+    fn native_index_from_bytes_rejects_posting_to_missing_document() {
+        let mut index = valid_native_index();
+        let posting_index = index
+            .postings
+            .iter()
+            .position(|posting| posting.len() == 1)
+            .unwrap();
+        index.postings[posting_index][0] = 99;
+        let payload = bincode::serialize(&index).unwrap();
+
+        let err = load_error(&payload);
+
+        assert!(err
+            .to_string()
+            .contains("posting points past document table"));
     }
 }
