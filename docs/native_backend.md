@@ -76,7 +76,7 @@ semantics through a fallback path.
 ## Persistent Indexes
 
 The native index can serialize its compact n-gram-to-ID tables, postings,
-document gram sets, and exact-match map with `bincode`. The public workflow is:
+document gram sets, and exact-match map with MessagePack. The public workflow is:
 
 ```bash
 tame-mt index build \
@@ -107,10 +107,9 @@ duplicate ZIP member names, total uncompressed size, member-specific hard caps,
 declared native-member byte sizes, compression ratios, and a default load-memory
 budget before native deserialization. This keeps corrupt, hand-edited, or
 zip-bomb-style `.tameidx` files from silently loading under the wrong settings
-or forcing unbounded reads. After `bincode` deserialization, the native loader
-checks n-gram IDs, posting/document cross-references, exact-map indices,
-sortedness, uniqueness, modes, and retrieval limits before the index can answer
-queries.
+or forcing unbounded reads. After native-byte decoding, the native loader checks
+n-gram IDs, posting/document cross-references, exact-map indices, sortedness,
+uniqueness, modes, and retrieval limits before the index can answer queries.
 
 Bundles are low-compression zip containers by default. Level-1 deflate keeps
 load time low while avoiding very large cache artifacts on public-corpus-scale

@@ -139,7 +139,7 @@ impl NativeNgramIndex {
 
     #[staticmethod]
     fn from_bytes(data: &[u8]) -> PyResult<Self> {
-        let index: Self = bincode::deserialize(data)
+        let index: Self = rmp_serde::from_slice(data)
             .map_err(|exc| PyValueError::new_err(format!("invalid native index bytes: {exc}")))?;
         index.validate_invariants()?;
         Ok(index)
@@ -180,7 +180,7 @@ impl NativeNgramIndex {
         queries: Vec<String>,
         k: usize,
     ) -> Vec<Vec<NeighborTuple>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             queries
                 .par_iter()
                 .map(|query| self.query_topk_impl(query, k))
@@ -252,7 +252,7 @@ impl NativeNgramIndex {
             ));
         }
         let target_index_ref: &NativeNgramIndex = &target_index;
-        py.allow_threads(|| {
+        py.detach(|| {
             source_query_norms
                 .par_iter()
                 .zip(target_query_norms_by_segment.par_iter())
@@ -445,7 +445,7 @@ impl NativeNgramIndex {
     }
 
     fn serialize_index(&self) -> PyResult<Vec<u8>> {
-        bincode::serialize(self).map_err(|exc| {
+        rmp_serde::to_vec(self).map_err(|exc| {
             PyValueError::new_err(format!("failed to serialize native index: {exc}"))
         })
     }
@@ -681,7 +681,7 @@ mod tests {
     }
 
     fn load_error(payload: &[u8]) -> pyo3::PyErr {
-        pyo3::prepare_freethreaded_python();
+        pyo3::Python::initialize();
         match NativeNgramIndex::from_bytes(payload) {
             Ok(_) => panic!("corrupt native index unexpectedly loaded"),
             Err(err) => err,
@@ -703,7 +703,7 @@ mod tests {
     #[test]
     fn native_index_from_bytes_accepts_valid_roundtrip() {
         let index = valid_native_index();
-        let payload = bincode::serialize(&index).unwrap();
+        let payload = rmp_serde::to_vec(&index).unwrap();
         let restored = NativeNgramIndex::from_bytes(&payload).unwrap();
 
         assert_eq!(restored.doc_count(), index.doc_count());
@@ -718,7 +718,7 @@ mod tests {
         let mut index = valid_native_index();
         let first_gram = index.gram_to_id.keys().next().unwrap().clone();
         *index.gram_to_id.get_mut(&first_gram).unwrap() = 99;
-        let payload = bincode::serialize(&index).unwrap();
+        let payload = rmp_serde::to_vec(&index).unwrap();
 
         let err = load_error(&payload);
 
@@ -734,7 +734,7 @@ mod tests {
             panic!("test fixture must have at least two grams");
         }
         index.gram_sets[0].swap(0, 1);
-        let payload = bincode::serialize(&index).unwrap();
+        let payload = rmp_serde::to_vec(&index).unwrap();
 
         let err = load_error(&payload);
 
@@ -752,7 +752,7 @@ mod tests {
             .position(|posting| posting.len() == 1)
             .unwrap();
         index.postings[posting_index][0] = 99;
-        let payload = bincode::serialize(&index).unwrap();
+        let payload = rmp_serde::to_vec(&index).unwrap();
 
         let err = load_error(&payload);
 

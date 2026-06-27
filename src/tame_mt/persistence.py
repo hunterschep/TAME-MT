@@ -19,7 +19,7 @@ from tame_mt.version import __version__
 
 INDEX_FORMAT = "tameidx"
 FORMAT_VERSION = 2
-NATIVE_INDEX_SCHEMA_VERSION = 2
+NATIVE_INDEX_SCHEMA_VERSION = 3
 
 MANIFEST_NAME = "manifest.json"
 TRAIN_SRC_NAME = "train.src"
