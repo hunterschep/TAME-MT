@@ -25,6 +25,9 @@ TRAIN_TGT_NAME = "train.tgt"
 SOURCE_INDEX_NAME = "source.index.bin"
 TARGET_INDEX_NAME = "target.index.bin"
 EXACT_PAIR_KEYS_NAME = "exact_pairs.keys"
+ZIP_COMPRESSION = zipfile.ZIP_DEFLATED
+ZIP_COMPRESSION_NAME = "deflated"
+ZIP_COMPRESSLEVEL = 1
 
 
 @dataclass(frozen=True)
@@ -92,7 +95,12 @@ def save_index_bundle(
     )
     output_path = Path(path)
     ensure_parent_dir(output_path)
-    with zipfile.ZipFile(output_path, mode="w", compression=zipfile.ZIP_STORED) as archive:
+    with zipfile.ZipFile(
+        output_path,
+        mode="w",
+        compression=ZIP_COMPRESSION,
+        compresslevel=ZIP_COMPRESSLEVEL,
+    ) as archive:
         archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
         archive.writestr(TRAIN_SRC_NAME, _encode_lines(train_src))
         if train_tgt is not None:
@@ -212,7 +220,8 @@ def _build_manifest(
         "target_backend": _backend_to_dict(target_index) if target_index is not None else None,
         "storage": {
             "container": "zip",
-            "compression": "stored",
+            "compression": ZIP_COMPRESSION_NAME,
+            "compresslevel": ZIP_COMPRESSLEVEL,
             "native_index_schema_version": NATIVE_INDEX_SCHEMA_VERSION,
             "source_index_bytes": len(source_index_bytes),
             "target_index_bytes": len(target_index_bytes) if target_index_bytes is not None else 0,

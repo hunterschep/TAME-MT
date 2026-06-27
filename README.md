@@ -92,9 +92,9 @@ tame-mt score \
   --json-out system_a.tame.json
 ```
 
-The `.tameidx` bundle stores the native source/target indexes plus the raw
-training text needed for TM outputs and optional segment reports. Treat it like
-the original training corpus for privacy and access control.
+The `.tameidx` bundle stores compressed native source/target indexes plus the
+raw training text needed for TM outputs and optional segment reports. Treat it
+like the original training corpus for privacy and access control.
 
 If the train/test/reference setup is fixed and only hypotheses change, cache
 the train-aware diagnostics once and reuse them:
@@ -602,12 +602,13 @@ one-time `.tameidx` build took about 9.6 seconds, and a later audit from the
 saved index took about 2.3 seconds with identical exposure outputs.
 
 On a synthetic benchmark on the same machine, a 100,000 train / 2,000 test
-`native_fast` audit takes about 3.2 seconds fresh, about 0.7 seconds from a
+`native_fast` audit takes about 2.5 seconds fresh, about 0.9 seconds from a
 saved `.tameidx`, and about 0.4 seconds for cached scoring of another
-hypothesis. At 100,000 train / 10,000 test, the same path takes about 5.2
-seconds fresh, about 2.8 seconds from a saved `.tameidx`, and about 2.3 seconds
-for cached scoring. The cached stage is the closest analogue to ordinary
-BLEU/chrF scoring because it no longer touches the training corpus.
+hypothesis. The compressed 100,000-pair source+target `.tameidx` is about 67 MB
+on that benchmark. At 100,000 train / 10,000 test, the same path takes about
+4.3 seconds fresh, about 2.9 seconds from a saved `.tameidx`, and about 2.3
+seconds for cached scoring. The cached stage is the closest analogue to
+ordinary BLEU/chrF scoring because it no longer touches the training corpus.
 
 For production evaluation, use a staged workflow:
 

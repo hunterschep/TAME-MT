@@ -58,16 +58,27 @@ def compute_exposure_result(
         )
 
     retrieval_k = max(1, config.index.topk)
-    source_tops_by_segment = source_index.batch_query_topk(test_src, retrieval_k)
-    target_tops_by_ref = (
-        [target_index.batch_query_topk(ref, retrieval_k) for ref in refs]
+    normalized_test_src = [source_index.normalized(source) for source in test_src]
+    source_tops_by_segment = source_index.batch_query_topk_normalized(
+        normalized_test_src, retrieval_k
+    )
+    normalized_refs_by_ref = (
+        [[target_index.normalized(text) for text in ref] for ref in refs]
         if target_index is not None and refs is not None
+        else []
+    )
+    target_tops_by_ref = (
+        [
+            target_index.batch_query_topk_normalized(normalized_ref, retrieval_k)
+            for normalized_ref in normalized_refs_by_ref
+        ]
+        if target_index is not None
         else []
     )
     pair_neighbors_by_segment = (
         _batch_pair_neighbors(
-            test_src=test_src,
-            refs=refs,
+            normalized_test_src=normalized_test_src,
+            normalized_refs_by_ref=normalized_refs_by_ref,
             source_tops_by_segment=source_tops_by_segment,
             target_tops_by_ref=target_tops_by_ref,
             source_index=source_index,
@@ -77,16 +88,6 @@ def compute_exposure_result(
         and refs is not None
         and source_index.supports_native_pair_candidates(target_index)
         else None
-    )
-    normalized_test_src = (
-        [normalize_text(source, config.normalization) for source in test_src]
-        if exact_pair_keys is not None
-        else []
-    )
-    normalized_refs_by_ref = (
-        [[normalize_text(text, config.normalization) for text in ref] for ref in refs]
-        if exact_pair_keys is not None and refs is not None
-        else []
     )
 
     exposures: list[SegmentExposure] = []
@@ -291,23 +292,25 @@ def _compute_pair_neighbor(
 
 
 def _batch_pair_neighbors(
-    test_src: list[str],
-    refs: list[list[str]],
+    normalized_test_src: list[str],
+    normalized_refs_by_ref: list[list[str]],
     source_tops_by_segment: list[list[NeighborResult]],
     target_tops_by_ref: list[list[list[NeighborResult]]],
     source_index: NgramInvertedIndex,
     target_index: NgramInvertedIndex,
 ) -> list[NeighborResult] | None:
-    ref_texts_by_segment = [[ref[idx] for ref in refs] for idx in range(len(test_src))]
+    ref_texts_by_segment = [
+        [ref[idx] for ref in normalized_refs_by_ref] for idx in range(len(normalized_test_src))
+    ]
     candidate_indices_by_segment: list[list[int]] = []
     for idx, source_top in enumerate(source_tops_by_segment):
         candidates = _candidate_indices(source_top)
         for tops_by_ref in target_tops_by_ref:
             candidates.update(_candidate_indices(tops_by_ref[idx]))
         candidate_indices_by_segment.append(sorted(candidates))
-    return source_index.batch_best_pair_candidates(
+    return source_index.batch_best_pair_candidates_normalized(
         target_index,
-        test_src,
+        normalized_test_src,
         ref_texts_by_segment,
         candidate_indices_by_segment,
     )

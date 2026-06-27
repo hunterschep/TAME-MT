@@ -10,3 +10,8 @@ def test_normalize_whitespace_and_nfkc() -> None:
 def test_case_preservation_and_lowercase_option() -> None:
     assert normalize_text("Hello") == "Hello"
     assert normalize_text("Hello", NormalizationConfig(lowercase=True)) == "hello"
+
+
+def test_collapse_whitespace_without_strip_preserves_edges() -> None:
+    config = NormalizationConfig(strip=False, collapse_whitespace=True)
+    assert normalize_text("  hello\t\tworld  ", config) == " hello world "

@@ -91,6 +91,7 @@ index schema version. If either version is unsupported, TAME-MT rejects the
 bundle before deserializing native bytes. Rebuild the index with the current
 `tame-mt index build` command after native-index upgrades.
 
-Bundles are uncompressed zip containers by default. This favors load speed over
-minimum disk size. Because they contain raw training text and normalized
+Bundles are low-compression zip containers by default. Level-1 deflate keeps
+load time low while avoiding very large cache artifacts on public-corpus-scale
+training sets. Because bundles contain raw training text and normalized
 exact-match and pair keys, they should be handled as training data.

@@ -21,6 +21,7 @@ python benchmarks/bench_synthetic.py \
   --max-index-build-seconds 8 \
   --max-indexed-seconds 4 \
   --max-cached-seconds 3 \
+  --max-index-bytes 120000000 \
   --assert-thresholds
 
 rm -rf build dist src/tame_mt.egg-info

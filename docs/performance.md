@@ -43,8 +43,9 @@ tame-mt audit \
 ```
 
 This skips native source/target index construction on later runs. The bundle is
-an uncompressed zip container for faster load time. It stores raw training text
-and normalized exact-match and pair keys, so treat it as training data.
+a low-compression zip container tuned for much smaller cache files while keeping
+load time low. It stores raw training text and normalized exact-match and pair
+keys, so treat it as training data.
 
 Use cached segment diagnostics when the train/test/reference setup is fixed and
 only system outputs change. Run the train-aware audit once:
@@ -87,20 +88,21 @@ and 2,000 test pairs completed as follows:
 | OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
 | OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
 | OPUS-100 `de-en`, 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~3.2s |
-| Synthetic 100k train / 2k test, one-time index build | `native_fast` | ~2.6s |
-| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~0.7s |
+| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.5s |
+| Synthetic 100k train / 2k test, one-time compressed index build | `native_fast` | ~3.5s |
+| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~0.9s |
 | Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.4s |
-| Synthetic 100k train / 10k test, fresh audit | `native_fast` | ~5.2s |
-| Synthetic 100k train / 10k test, one-time index build | `native_fast` | ~2.6s |
-| Synthetic 100k train / 10k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.8s |
+| Synthetic 100k train / 10k test, fresh audit | `native_fast` | ~4.3s |
+| Synthetic 100k train / 10k test, one-time compressed index build | `native_fast` | ~3.5s |
+| Synthetic 100k train / 10k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.9s |
 | Synthetic 100k train / 10k test, cached hypothesis scoring | cached diagnostics | ~2.3s |
 
 These numbers are smoke timings, not universal performance claims. Report the
 machine, corpus size, backend, and full TAME-MT signature for benchmark tables.
-The OPUS-100 100k source+target `.tameidx` bundle was about 383 MB because
-bundles are currently stored uncompressed to favor load speed. The synthetic
-100k source+target `.tameidx` bundle in the table above was about 323 MB.
+The synthetic 100k source+target `.tameidx` bundle in the table above is about
+67 MB with low-compression ZIP storage. The same payload was about 323 MB when
+stored uncompressed, so acceptance checks now include a bundle-size ceiling as
+well as runtime ceilings.
 
 The cached path still runs SacreBLEU/chrF over system and TM outputs, but it no
 longer touches the training corpus. TAME-MT aggregates SacreBLEU segment

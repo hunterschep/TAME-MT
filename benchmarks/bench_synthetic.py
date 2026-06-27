@@ -32,6 +32,12 @@ def main() -> int:
         help="staged mode threshold for .tameidx load plus indexed audit time",
     )
     parser.add_argument("--max-cached-seconds", type=float, default=None)
+    parser.add_argument(
+        "--max-index-bytes",
+        type=int,
+        default=None,
+        help="staged mode threshold for persisted .tameidx bundle size",
+    )
     parser.add_argument("--assert-thresholds", action="store_true")
     args = parser.parse_args()
 
@@ -80,6 +86,7 @@ def main() -> int:
             max_index_build_seconds=args.max_index_build_seconds,
             max_indexed_seconds=args.max_indexed_seconds,
             max_cached_seconds=args.max_cached_seconds,
+            max_index_bytes=args.max_index_bytes,
         )
     return 0
 
@@ -143,6 +150,7 @@ def assert_stage_thresholds(
     max_index_build_seconds: float | None,
     max_indexed_seconds: float | None,
     max_cached_seconds: float | None,
+    max_index_bytes: int | None,
 ) -> None:
     if not isinstance(stages, dict):
         raise SystemExit("staged benchmark payload is missing stage timings")
@@ -166,6 +174,14 @@ def assert_stage_thresholds(
         if value > threshold:
             raise SystemExit(
                 f"staged benchmark {key} exceeded threshold: {value:.2f}s > {threshold:.2f}s"
+            )
+    if max_index_bytes is not None:
+        value = stages["index_bytes"]
+        if not isinstance(value, int):
+            raise SystemExit("staged benchmark field index_bytes is not an integer")
+        if value > max_index_bytes:
+            raise SystemExit(
+                f"staged benchmark index_bytes exceeded threshold: {value} > {max_index_bytes}"
             )
 
 

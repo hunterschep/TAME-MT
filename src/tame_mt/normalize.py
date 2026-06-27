@@ -5,6 +5,7 @@ import unicodedata
 
 from tame_mt.config import NormalizationConfig
 
+_WHITESPACE_RE = re.compile(r"\s+")
 _PUNCT_TRANSLATION = str.maketrans(
     {
         "\u2018": "'",
@@ -28,17 +29,20 @@ _PUNCT_TRANSLATION = str.maketrans(
 
 def normalize_text(text: str, config: NormalizationConfig | None = None) -> str:
     config = config or NormalizationConfig()
-    normalized = unicodedata.normalize(config.unicode_form, text)
+    normalized = text if text.isascii() else unicodedata.normalize(config.unicode_form, text)
     if config.normalize_punctuation:
         normalized = normalized.translate(_PUNCT_TRANSLATION)
     if config.strip_diacritics:
         normalized = _strip_diacritics(normalized)
     if config.lowercase:
         normalized = normalized.casefold()
-    if config.strip:
-        normalized = normalized.strip()
-    if config.collapse_whitespace:
-        normalized = re.sub(r"\s+", " ", normalized)
+    if config.strip and config.collapse_whitespace:
+        normalized = " ".join(normalized.split())
+    else:
+        if config.strip:
+            normalized = normalized.strip()
+        if config.collapse_whitespace:
+            normalized = _WHITESPACE_RE.sub(" ", normalized)
     return normalized
 
 

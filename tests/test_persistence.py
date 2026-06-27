@@ -10,6 +10,9 @@ from tame_mt.exceptions import ConfigurationError
 from tame_mt.persistence import (
     FORMAT_VERSION,
     NATIVE_INDEX_SCHEMA_VERSION,
+    ZIP_COMPRESSION,
+    ZIP_COMPRESSION_NAME,
+    ZIP_COMPRESSLEVEL,
     inspect_index_bundle,
     load_index_bundle,
     save_index_bundle,
@@ -36,9 +39,13 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     assert loaded.exact_pair_keys is not None
     assert manifest["format"] == "tameidx"
     assert manifest["format_version"] == FORMAT_VERSION
+    assert manifest["storage"]["compression"] == ZIP_COMPRESSION_NAME
+    assert manifest["storage"]["compresslevel"] == ZIP_COMPRESSLEVEL
     assert manifest["storage"]["native_index_schema_version"] == NATIVE_INDEX_SCHEMA_VERSION
     assert manifest["privacy"]["stores_raw_training_text"] is True
     assert manifest["privacy"]["stores_normalized_pair_keys"] is True
+    with zipfile.ZipFile(path, "r") as archive:
+        assert {item.compress_type for item in archive.infolist()} == {ZIP_COMPRESSION}
 
     result = TameScorer(config).evaluate_index_bundle(
         loaded,

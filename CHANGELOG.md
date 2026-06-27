@@ -16,9 +16,17 @@
   exact-match maps.
 - Parallelized batched native pair reranking and removed redundant exact-match
   checks from exposure assembly for faster large-test audits.
+- Reused normalized source/reference batches across native search, exact-pair
+  checks, and pair reranking to reduce repeated Python preprocessing in
+  large-test audits.
+- Added fast-path normalization for ASCII text and common strip-plus-whitespace
+  normalization.
 - Added persistent `.tameidx` native index bundles plus `tame-mt index build`,
   `tame-mt index inspect`, and `score`/`audit --index` reuse workflows for
   large training corpora.
+- Switched persisted `.tameidx` bundles to low-compression ZIP storage, cutting
+  the synthetic 100k source+target bundle from about 323 MB to about 67 MB in
+  local smoke timing while preserving fast indexed reuse.
 - Added explicit `.tameidx` bundle and native index schema versioning so
   incompatible persisted indexes fail with clear rebuild guidance.
 - Optimized native index reuse by avoiding duplicate Python exact maps and by
@@ -47,6 +55,8 @@
 - Tightened release acceptance performance checks to cover the 100k staged
   benchmark path with explicit build, indexed-audit, and cached-score
   thresholds.
+- Added a persisted index-size threshold to the staged benchmark acceptance
+  guard.
 - Replaced inline wheel smoke tests with a cross-platform script covering gzip
   IO, index reuse, cached scoring, and TM metadata outputs.
 - Added clean-venv built-wheel smoke testing to the acceptance script.

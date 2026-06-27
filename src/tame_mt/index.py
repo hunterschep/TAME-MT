@@ -200,11 +200,18 @@ class NgramInvertedIndex:
     def batch_query_topk(self, texts: list[str], k: int) -> list[list[NeighborResult]]:
         if k <= 0:
             return [[] for _ in texts]
-        if self._native_index is None:
-            return [self.query_topk(text, k) for text in texts]
-
         normalized = [normalize_text(text, self.norm_config) for text in texts]
-        native_rows = self._native_index.batch_query_topk(normalized, k)
+        return self.batch_query_topk_normalized(normalized, k)
+
+    def batch_query_topk_normalized(
+        self, normalized_texts: list[str], k: int
+    ) -> list[list[NeighborResult]]:
+        if k <= 0:
+            return [[] for _ in normalized_texts]
+        if self._native_index is None:
+            return [self._query_topk_normalized(text, k) for text in normalized_texts]
+
+        native_rows = self._native_index.batch_query_topk(normalized_texts, k)
         return [
             [
                 NeighborResult(index=item[0], score=float(item[1]), exact=bool(item[2]))
@@ -214,9 +221,11 @@ class NgramInvertedIndex:
         ]
 
     def query_topk(self, text: str, k: int) -> list[NeighborResult]:
+        return self._query_topk_normalized(normalize_text(text, self.norm_config), k)
+
+    def _query_topk_normalized(self, query_norm: str, k: int) -> list[NeighborResult]:
         if k <= 0:
             return []
-        query_norm = normalize_text(text, self.norm_config)
         if self._native_index is not None:
             return [
                 NeighborResult(index=item[0], score=float(item[1]), exact=bool(item[2]))
@@ -386,6 +395,22 @@ class NgramInvertedIndex:
             [normalize_text(ref, target_index.norm_config) for ref in ref_texts]
             for ref_texts in ref_texts_by_segment
         ]
+        return self.batch_best_pair_candidates_normalized(
+            target_index,
+            source_norms,
+            target_norms_by_segment,
+            candidate_indices_by_segment,
+        )
+
+    def batch_best_pair_candidates_normalized(
+        self,
+        target_index: NgramInvertedIndex,
+        source_norms: list[str],
+        target_norms_by_segment: list[list[str]],
+        candidate_indices_by_segment: list[list[int]],
+    ) -> list[NeighborResult] | None:
+        if self._native_index is None or target_index._native_index is None:
+            return None
         native_rows = self._native_index.batch_best_pair_candidates(
             target_index._native_index,
             source_norms,
