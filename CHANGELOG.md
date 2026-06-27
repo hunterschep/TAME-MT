@@ -7,6 +7,8 @@
 - Added nearest-neighbor translation-memory baseline scoring with BLEU and chrF.
 - Added text, JSON, segment JSONL, TM output modes, and cached scoring from
   prior segment diagnostics.
+- Added real `score --verbose` and `audit --verbose` stage timing output to
+  stderr for long-running jobs.
 - Added a native Rust/PyO3 nearest-neighbor backend with exact and bounded fast
   retrieval modes, compact integer n-gram indexes, parallel batch query, bulk
   candidate scoring, and pure-Python fallback modes.

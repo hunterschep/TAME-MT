@@ -155,6 +155,7 @@ ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 --bleu-tokenize 13a
 --bleu-lowercase
 --chrf-word-order 2
+--verbose
 ```
 
 Numeric options must be finite decimal values. `nan`, `inf`, and `-inf` are
@@ -162,6 +163,10 @@ rejected because TAME-MT JSON outputs are strict JSON and never emit
 non-standard floating-point tokens. Exposure thresholds are fractions in the
 closed interval \([0, 1]\), and comma-separated numeric lists must not contain
 empty items.
+
+`score --verbose` and `audit --verbose` write stage timings to stderr for input
+reading, index loading when used, corpus evaluation, and output writing. This
+does not change the report written to stdout.
 
 ## Doctor
 

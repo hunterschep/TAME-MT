@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import platform
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from time import perf_counter
 from typing import cast
 
 import sacrebleu
@@ -91,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", action="store_true", help="suppress human-readable stdout report"
     )
     score_parser.add_argument(
-        "--verbose", action="store_true", help="reserved for future progress reporting"
+        "--verbose", action="store_true", help="write stage timing details to stderr"
     )
     score_parser.set_defaults(handler=run_score)
 
@@ -113,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", action="store_true", help="suppress human-readable stdout report"
     )
     audit_parser.add_argument(
-        "--verbose", action="store_true", help="reserved for future progress reporting"
+        "--verbose", action="store_true", help="write stage timing details to stderr"
     )
     audit_parser.set_defaults(handler=run_audit)
 
@@ -239,44 +241,50 @@ def run_doctor(args: argparse.Namespace) -> int:
 
 def run_score(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    test_src = read_lines(args.test_src)
-    refs = [read_lines(path) for path in args.ref]
-    hyp = read_lines(args.hyp)
+    with _timed_step(args, "read evaluation inputs"):
+        test_src = read_lines(args.test_src)
+        refs = [read_lines(path) for path in args.ref]
+        hyp = read_lines(args.hyp)
 
     scorer = TameScorer(config)
     if args.index:
-        bundle = load_index_bundle(args.index, config)
+        with _timed_step(args, "load index bundle"):
+            bundle = load_index_bundle(args.index, config)
         if bundle.train_tgt is None:
             raise TameMTError("indexed train.tgt is required for score mode")
         train_src = bundle.train_src
         train_tgt = bundle.train_tgt
-        result = scorer.evaluate_index_bundle(bundle, test_src, refs, hyp)
+        with _timed_step(args, "evaluate indexed corpus"):
+            result = scorer.evaluate_index_bundle(bundle, test_src, refs, hyp)
     else:
         train_src_path = _required_arg(args, "train_src", "--train-src")
         train_tgt_path = _required_arg(args, "train_tgt", "--train-tgt")
-        train_src = read_lines(train_src_path)
-        train_tgt = read_lines(train_tgt_path)
-        result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp)
-    if args.tm_out:
-        write_lines(args.tm_out, result.tm_hyp)
-    if args.json_out:
-        write_json_report(args.json_out, result.report)
-    if args.segment_out:
-        _warn_neighbor_text(args)
-        write_segment_jsonl(
-            args.segment_out,
-            result.exposures,
-            result.tm_results,
-            train_src=train_src,
-            train_tgt=train_tgt,
-            test_src=test_src,
-            refs=refs,
-            hyp=hyp,
-            include_neighbor_text=args.include_neighbor_text,
-            include_source_text=args.include_source_text,
-            include_reference_text=args.include_reference_text,
-            include_hyp_text=args.include_hyp_text,
-        )
+        with _timed_step(args, "read training inputs"):
+            train_src = read_lines(train_src_path)
+            train_tgt = read_lines(train_tgt_path)
+        with _timed_step(args, "evaluate corpus"):
+            result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp)
+    with _timed_step(args, "write outputs"):
+        if args.tm_out:
+            write_lines(args.tm_out, result.tm_hyp)
+        if args.json_out:
+            write_json_report(args.json_out, result.report)
+        if args.segment_out:
+            _warn_neighbor_text(args)
+            write_segment_jsonl(
+                args.segment_out,
+                result.exposures,
+                result.tm_results,
+                train_src=train_src,
+                train_tgt=train_tgt,
+                test_src=test_src,
+                refs=refs,
+                hyp=hyp,
+                include_neighbor_text=args.include_neighbor_text,
+                include_source_text=args.include_source_text,
+                include_reference_text=args.include_reference_text,
+                include_hyp_text=args.include_hyp_text,
+            )
     if not args.quiet:
         print(render_text_report(result.report))
     return 0
@@ -284,38 +292,44 @@ def run_score(args: argparse.Namespace) -> int:
 
 def run_audit(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    test_src = read_lines(args.test_src)
-    refs = [read_lines(path) for path in args.ref] if args.ref else None
+    with _timed_step(args, "read evaluation inputs"):
+        test_src = read_lines(args.test_src)
+        refs = [read_lines(path) for path in args.ref] if args.ref else None
 
     scorer = TameScorer(config)
     if args.index:
-        bundle = load_index_bundle(args.index, config)
+        with _timed_step(args, "load index bundle"):
+            bundle = load_index_bundle(args.index, config)
         train_src = bundle.train_src
         train_tgt = bundle.train_tgt
-        result = scorer.evaluate_index_bundle(bundle, test_src, refs, hyp=None)
+        with _timed_step(args, "evaluate indexed corpus"):
+            result = scorer.evaluate_index_bundle(bundle, test_src, refs, hyp=None)
     else:
         train_src_path = _required_arg(args, "train_src", "--train-src")
-        train_src = read_lines(train_src_path)
-        train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
-        result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp=None)
-    if args.json_out:
-        write_json_report(args.json_out, result.report)
-    if args.segment_out:
-        _warn_neighbor_text(args)
-        write_segment_jsonl(
-            args.segment_out,
-            result.exposures,
-            result.tm_results,
-            train_src=train_src,
-            train_tgt=train_tgt,
-            test_src=test_src,
-            refs=refs,
-            hyp=None,
-            include_neighbor_text=args.include_neighbor_text,
-            include_source_text=args.include_source_text,
-            include_reference_text=args.include_reference_text,
-            include_hyp_text=False,
-        )
+        with _timed_step(args, "read training inputs"):
+            train_src = read_lines(train_src_path)
+            train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
+        with _timed_step(args, "evaluate corpus"):
+            result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs, hyp=None)
+    with _timed_step(args, "write outputs"):
+        if args.json_out:
+            write_json_report(args.json_out, result.report)
+        if args.segment_out:
+            _warn_neighbor_text(args)
+            write_segment_jsonl(
+                args.segment_out,
+                result.exposures,
+                result.tm_results,
+                train_src=train_src,
+                train_tgt=train_tgt,
+                test_src=test_src,
+                refs=refs,
+                hyp=None,
+                include_neighbor_text=args.include_neighbor_text,
+                include_source_text=args.include_source_text,
+                include_reference_text=args.include_reference_text,
+                include_hyp_text=False,
+            )
     if not args.quiet:
         print(render_text_report(result.report))
     return 0
@@ -578,6 +592,30 @@ def _warn_neighbor_text(args: argparse.Namespace) -> None:
             "Warning: --include-neighbor-text may write raw training text to the segment report.",
             file=sys.stderr,
         )
+
+
+@contextmanager
+def _timed_step(args: argparse.Namespace, label: str) -> Iterator[None]:
+    started = perf_counter()
+    try:
+        yield
+    except Exception:
+        _emit_timing(args, label, perf_counter() - started, failed=True)
+        raise
+    _emit_timing(args, label, perf_counter() - started, failed=False)
+
+
+def _emit_timing(
+    args: argparse.Namespace,
+    label: str,
+    seconds: float,
+    *,
+    failed: bool,
+) -> None:
+    if not getattr(args, "verbose", False):
+        return
+    status = "failed after" if failed else "completed in"
+    print(f"tame-mt: {label} {status} {seconds:.3f}s", file=sys.stderr)
 
 
 def _required_arg(args: argparse.Namespace, attr: str, flag: str) -> str:

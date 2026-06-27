@@ -44,6 +44,66 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
     assert json.loads(segment_lines[0])["source_exact"] is True
 
 
+def test_cli_score_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
+    json_out = tmp_path / "report.json"
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--json-out",
+            str(json_out),
+            "--quiet",
+            "--verbose",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.out == ""
+    assert "tame-mt: read evaluation inputs completed in " in captured.err
+    assert "tame-mt: read training inputs completed in " in captured.err
+    assert "tame-mt: evaluate corpus completed in " in captured.err
+    assert "tame-mt: write outputs completed in " in captured.err
+
+
+def test_cli_audit_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
+    json_out = tmp_path / "audit.json"
+    rc = main(
+        [
+            "audit",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--json-out",
+            str(json_out),
+            "--quiet",
+            "--verbose",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.out == ""
+    assert "tame-mt: read evaluation inputs completed in " in captured.err
+    assert "tame-mt: read training inputs completed in " in captured.err
+    assert "tame-mt: evaluate corpus completed in " in captured.err
+    assert "tame-mt: write outputs completed in " in captured.err
+
+
 def test_cli_score_supports_gzip_text_inputs_and_outputs(tmp_path: Path) -> None:
     train_src = tmp_path / "train.src.gz"
     train_tgt = tmp_path / "train.tgt.gz"
