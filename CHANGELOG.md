@@ -94,6 +94,8 @@
 - Added clean-venv built-wheel smoke testing to the acceptance script.
 - Added built-wheel smoke testing to package CI and ensured wheel CI reruns when
   smoke fixtures or the smoke script change.
+- Extended wheel smoke coverage to exercise the public prepared cached-scoring
+  API from the installed package.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

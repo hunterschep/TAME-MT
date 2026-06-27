@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from tame_mt import CachedSegmentScorer, TameScorer, read_segment_jsonl
+
 
 def main() -> int:
     project = Path(__file__).resolve().parents[1]
@@ -125,10 +127,30 @@ def main() -> int:
         cached = _read_json(tmp / "cached.json.gz")
         batch_baseline = _read_json(tmp / "batch_reports" / "baseline.json")
         batch_variant = _read_json(tmp / "batch_reports" / "variant.json")
+        exposures, tm_results = read_segment_jsonl(tmp / "segments.jsonl.gz")
+        prepared = TameScorer().prepare_from_artifacts(
+            exposures=exposures,
+            tm_results=tm_results,
+            refs=[_read_gzip_lines(gz_inputs["test.ref"])],
+            num_train=4,
+        )
+        if not isinstance(prepared, CachedSegmentScorer):
+            raise SystemExit("prepared cached scorer did not use the public API type")
+        prepared_report = prepared.score(_read_gzip_lines(gz_inputs["hyp.out"]))
+        prepared_batch = prepared.score_many(
+            {
+                "baseline": _read_gzip_lines(gz_inputs["hyp.out"]),
+                "variant": _read_gzip_lines(variant_hyp),
+            }
+        )
         if fresh["quality"] != indexed["quality"] or fresh["exposure"] != indexed["exposure"]:
             raise SystemExit("indexed score drifted from fresh score")
         if fresh["quality"] != cached["quality"] or fresh["exposure"] != cached["exposure"]:
             raise SystemExit("cached score drifted from fresh score")
+        if prepared_report.to_dict()["quality"] != cached["quality"]:
+            raise SystemExit("prepared cached API drifted from single cached score")
+        if prepared_batch["baseline"].to_dict()["quality"] != cached["quality"]:
+            raise SystemExit("prepared cached batch API drifted from single cached score")
         if batch_baseline["quality"] != cached["quality"]:
             raise SystemExit("batch cached baseline drifted from single cached score")
         if batch_variant["quality"]["system"] == batch_baseline["quality"]["system"]:
