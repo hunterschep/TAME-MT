@@ -35,6 +35,8 @@ jobs:
         run: pytest
       - name: Smoke benchmark
         run: python benchmarks/bench_synthetic.py --small --assert-thresholds
+      - name: Staged smoke benchmark
+        run: python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
       - name: Type check
         run: mypy src/tame_mt
 

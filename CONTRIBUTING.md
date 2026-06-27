@@ -27,7 +27,10 @@ python -m twine check dist/*
 ## Release Checklist
 
 1. Update `CHANGELOG.md`.
-2. Confirm `pytest`, `ruff check .`, and `mypy src/tame_mt` pass.
-3. Run `python -m build`.
-4. Run `python -m twine check dist/*`.
-5. Smoke-test the toy example.
+2. Run `scripts/acceptance.sh`.
+3. Confirm the staged synthetic benchmark output stays under the release
+   thresholds for fresh, indexed, cached, prepared cached, and batch cached
+   scoring.
+4. Confirm the built-wheel smoke test and `twine check` pass.
+5. Remove generated `dist/`, build, and editable native-extension artifacts
+   before committing.

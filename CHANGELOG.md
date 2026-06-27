@@ -81,6 +81,8 @@
   cached-scoring timings.
 - Extended staged benchmark guards with prepared cached-score and batch
   per-system latency checks.
+- Added the staged synthetic benchmark to CI so indexed, cached, prepared
+  cached, and batch cached performance regressions are caught before merge.
 - Made staged benchmark indexed timings include persisted `.tameidx` load time.
 - Tightened release acceptance performance checks to cover the 100k staged
   benchmark path with explicit build, indexed-audit, and cached-score
@@ -99,4 +101,6 @@
 - Added toy corpus, documentation, unit tests, native tests, and CI checks.
 - Added typed exceptions, typed package marker, maturin package metadata, and
   release-oriented docs for public distribution.
+- Polished package classifiers and contributor release guidance for the
+  hardened acceptance workflow.
 - Removed unnecessary runtime dependencies beyond SacreBLEU.
