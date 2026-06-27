@@ -192,13 +192,13 @@ For a normalized string \(s\), define \(G(s)\) as the set of character n-grams
 for orders 3, 4, and 5:
 
 ```math
-G(s) = \{ \text{all character n-grams in } s \mid n \in \{3,4,5\} \}
+G(s) = G_3(s) \cup G_4(s) \cup G_5(s)
 ```
 
 The similarity between two strings \(a\) and \(b\) is Jaccard similarity:
 
 ```math
-\operatorname{sim}(a,b) =
+s(a,b) =
 \frac{|G(a) \cap G(b)|}{|G(a) \cup G(b)|}
 ```
 
@@ -207,18 +207,20 @@ similarity is 0.0.
 
 ## Exposure Metrics
 
-For each test source \(x_i\), TAME-MT finds the closest training source:
+Let \(u_j\) be the normalized source side of training pair \(j\), and let
+\(v_j\) be its normalized target side. For each test source \(x_i\), TAME-MT
+finds the closest training source:
 
 ```math
-\operatorname{SourceExposure}_i =
-\max_j \operatorname{sim}(x_i, \operatorname{train\_src}_j)
+E_i^{src} =
+\max_j s(x_i, u_j)
 ```
 
 The nearest-neighbor index is:
 
 ```math
-\operatorname{SourceNNIndex}_i =
-\arg\max_j \operatorname{sim}(x_i, \operatorname{train\_src}_j)
+n_i^{src} =
+\min \{j : s(x_i, u_j) = E_i^{src}\}
 ```
 
 Ties are broken by choosing the lowest training index.
@@ -226,33 +228,31 @@ Ties are broken by choosing the lowest training index.
 For a reference translation \(r_i\), target exposure is:
 
 ```math
-\operatorname{TargetExposure}_i =
-\max_j \operatorname{sim}(r_i, \operatorname{train\_tgt}_j)
+E_i^{tgt} =
+\max_j s(r_i, v_j)
 ```
 
 Pair exposure asks a stricter question: is there one training pair whose source
 and target sides are both close to the test source/reference pair?
 
-For a test pair \((x_i, r_i)\) and training pair
-\((\operatorname{train\_src}_j, \operatorname{train\_tgt}_j)\):
+For test pair \((x_i, r_i)\) and training pair \((u_j, v_j)\):
 
 ```math
-\operatorname{pair\_sim}(i,j) =
+p(i,j) =
 \min(
-  \operatorname{sim}(x_i, \operatorname{train\_src}_j),
-  \operatorname{sim}(r_i, \operatorname{train\_tgt}_j)
+  s(x_i, u_j),
+  s(r_i, v_j)
 )
 ```
 
 Then:
 
 ```math
-\operatorname{PairExposure}_i =
-\max_j \operatorname{pair\_sim}(i,j)
+E_i^{pair} =
+\max_j p(i,j)
 ```
 
-`PairLeak@0.85` is the fraction of test examples where
-\(\operatorname{PairExposure}_i \ge 0.85\).
+`PairLeak@0.85` is the fraction of test examples where \(E_i^{pair} \ge 0.85\).
 
 In v0.1, pair exposure reranks the union of source and target top-k candidates
 instead of scoring every training pair. Exact pair overlap is still computed
@@ -264,31 +264,31 @@ The translation-memory hypothesis for test source \(x_i\) is selected using
 only the source side:
 
 ```math
-j^\*(i) = \arg\max_j \operatorname{sim}(x_i, \operatorname{train\_src}_j)
+j^\*(i) = n_i^{src}
 ```
 
 ```math
-\operatorname{tm\_hyp}_i =
-\operatorname{train\_tgt}_{j^\*(i)}
+h_i^{TM} =
+v_{j^\*(i)}
 ```
 
 If no candidate shares character n-grams with the test source, the default
 policy is:
 
 ```math
-\operatorname{tm\_hyp}_i = ""
+h_i^{TM} = ""
 ```
 
 The baseline scores are ordinary corpus metrics:
 
 ```math
-\operatorname{TM\text{-}BLEU} =
-\operatorname{BLEU}(\operatorname{tm\_hyp}, \operatorname{ref})
+B_{TM} =
+BLEU(h^{TM}, r)
 ```
 
 ```math
-\Delta\operatorname{TM\text{-}BLEU} =
-\operatorname{SystemBLEU} - \operatorname{TM\text{-}BLEU}
+\Delta B_{TM} =
+B_{sys} - B_{TM}
 ```
 
 The same definitions apply to chrF.
@@ -313,8 +313,8 @@ TM-BLEU/TM-chrF, and delta over TM.
 Generalization gap is:
 
 ```math
-\operatorname{GenGap\text{-}BLEU} =
-\operatorname{BLEU}_{near} - \operatorname{BLEU}_{far}
+g_{BLEU} =
+B_{near} - B_{far}
 ```
 
 A large positive gap means the system performs much better on train-similar
