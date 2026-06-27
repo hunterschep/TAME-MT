@@ -85,6 +85,26 @@ def test_read_segment_jsonl_rejects_non_bool_string(tmp_path: Path) -> None:
         read_segment_jsonl(path)
 
 
+def test_read_segment_jsonl_rejects_unknown_bin(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["bin"] = "close-ish"
+    _write_jsonl(path, [row])
+
+    with pytest.raises(InputDataError, match="unknown segment bin"):
+        read_segment_jsonl(path)
+
+
+def test_read_segment_jsonl_rejects_non_string_tm_hyp(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["tm_hyp"] = ["not", "a", "string"]
+    _write_jsonl(path, [row])
+
+    with pytest.raises(InputDataError, match="expected string value"):
+        read_segment_jsonl(path)
+
+
 def test_read_segment_jsonl_reports_invalid_required_float(tmp_path: Path) -> None:
     path = tmp_path / "segments.jsonl"
     row = _payload(0)

@@ -36,6 +36,8 @@
   persisting normalized exact-pair keys for faster repeated audits.
 - Hardened cached segment artifact scoring with strict index validation,
   canonical ordering, and safer JSON type parsing.
+- Hardened cached segment JSONL parsing so malformed bin labels and non-string
+  TM hypotheses fail closed instead of being coerced.
 - Rejected non-finite numeric config and cached-artifact values and made JSON
   report/segment writers fail closed instead of emitting non-standard `NaN` or
   infinity values.

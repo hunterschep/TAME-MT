@@ -10,6 +10,7 @@ from tame_mt.json_utils import strict_json_loads
 from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 SegmentRow = TypeVar("SegmentRow", SegmentExposure, SegmentTMResult)
+VALID_SEGMENT_BINS = frozenset({"source_exact", "near", "medium", "far"})
 
 
 def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[SegmentTMResult]]:
@@ -107,7 +108,7 @@ def _segment_exposure_from_payload(payload: dict[str, Any], line_number: int) ->
             pair_exposure=_optional_float(payload.get("pair_exposure")),
             pair_nn_index=_optional_int(payload.get("pair_nn_index")),
             pair_exact=_optional_bool(payload.get("pair_exact")),
-            bin=str(payload["bin"]),
+            bin=_required_bin(payload["bin"]),
         )
     except KeyError as exc:
         raise InputDataError(f"segment JSONL line {line_number} is missing field {exc}") from exc
@@ -120,7 +121,7 @@ def _tm_result_from_payload(payload: dict[str, Any], line_number: int) -> Segmen
         tm_source_similarity = _optional_float(payload.get("tm_source_similarity"))
         return SegmentTMResult(
             index=_required_int(payload["index"]),
-            tm_hyp=str(payload.get("tm_hyp", "")),
+            tm_hyp=_optional_str(payload.get("tm_hyp")) or "",
             tm_source_index=_optional_int(payload.get("tm_source_index")),
             tm_source_similarity=tm_source_similarity if tm_source_similarity is not None else 0.0,
         )
@@ -219,3 +220,20 @@ def _optional_bool(value: object) -> bool | None:
     if isinstance(value, int) and value in {0, 1}:
         return bool(value)
     raise InputDataError(f"expected bool-compatible value, got {type(value).__name__}")
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    raise InputDataError(f"expected string value, got {type(value).__name__}")
+
+
+def _required_bin(value: object) -> str:
+    parsed = _optional_str(value)
+    if parsed is None:
+        raise InputDataError("expected bin string, got null")
+    if parsed not in VALID_SEGMENT_BINS:
+        raise InputDataError(f"unknown segment bin {parsed!r}")
+    return parsed
