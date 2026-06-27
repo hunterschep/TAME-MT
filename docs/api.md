@@ -174,6 +174,10 @@ change later `score()` or `score_many()` calls.
 
 Artifact indices are validated and canonicalized before scoring. They must be
 unique and contiguous from `0` to `N-1`; valid rows may be supplied out of order.
+Cached segment rows also carry their exposure-bin labels. `score_from_artifacts`
+and prepared cached scorers verify that each stored bin still matches the
+current `ScoreConfig.bins`; if you change `far_threshold` or `near_threshold`,
+rerun the audit or score cached artifacts with the original bin settings.
 
 ## Custom Configuration
 

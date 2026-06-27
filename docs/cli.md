@@ -119,6 +119,11 @@ tame-mt score-cached-batch \
   --json-out-dir tame_reports
 ```
 
+Cached segment rows include the source-exposure bin assigned during the original
+audit. `score-cached` and `score-cached-batch` verify those labels against the
+current `--far-threshold` and `--near-threshold`; if the thresholds differ,
+TAME-MT fails instead of producing a mixed-configuration report.
+
 `score-cached` reuses source/target/pair exposure and TM hypotheses from the
 segment JSONL file. It recomputes only system metrics, TM metrics, delta over
 TM, bin scores, warnings, and the final report.

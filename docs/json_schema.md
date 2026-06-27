@@ -134,7 +134,11 @@ reports or segment diagnostics.
 Consumers should treat `index` as the authoritative original segment position.
 `score-cached` requires indices to be unique and contiguous from `0` to `N-1`
 and sorts valid rows by index before scoring. `--num-train` must be the positive
-training segment count used to create the segment diagnostics.
+training segment count used to create the segment diagnostics. Cached segment
+rows store exposure-bin labels, so cached scoring rejects rows whose stored
+`bin` does not match the current `--far-threshold` and `--near-threshold`
+settings. Regenerate the segment JSONL, or pass the same bin thresholds used to
+create it.
 
 All numeric JSON values are finite JSON numbers. Cached segment diagnostics and
 index-bundle manifests are parsed as strict JSON, so non-standard `NaN`,

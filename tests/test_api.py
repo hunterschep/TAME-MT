@@ -4,8 +4,10 @@ import pytest
 
 import tame_mt
 from tame_mt import (
+    BinConfig,
     CachedSegmentScorer,
     MetricConfig,
+    ScoreConfig,
     SegmentExposure,
     SegmentTMResult,
     TameScorer,
@@ -201,6 +203,28 @@ def test_score_from_artifacts_rejects_non_positive_num_train() -> None:
             refs=[["bad"]],
             hyp=["bad"],
             num_train=0,
+        )
+
+
+def test_score_from_artifacts_rejects_bin_threshold_mismatch() -> None:
+    scorer = TameScorer(
+        ScoreConfig(
+            bins=BinConfig(
+                far_threshold=0.40,
+                near_threshold=0.70,
+            )
+        )
+    )
+
+    with pytest.raises(InputDataError, match="cached segment bin mismatch"):
+        scorer.score_from_artifacts(
+            exposures=[_segment(0, 0.35, "medium")],
+            tm_results=[
+                SegmentTMResult(index=0, tm_hyp="bad", tm_source_index=0, tm_source_similarity=0.35)
+            ],
+            refs=[["bad"]],
+            hyp=["bad"],
+            num_train=1,
         )
 
 

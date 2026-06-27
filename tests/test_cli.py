@@ -274,6 +274,55 @@ def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
     assert cached["exposure"] == full["exposure"]
 
 
+def test_cli_score_cached_rejects_bin_threshold_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    segments = tmp_path / "segments.jsonl"
+    json_out = tmp_path / "cached.json"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--near-threshold",
+            "0.80",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert cached_rc == 2
+    assert "cached segment bin mismatch" in captured.err
+    assert not json_out.exists()
+
+
 def test_cli_score_cached_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
     cached_json = tmp_path / "cached.json"
     segments = tmp_path / "segments.jsonl"

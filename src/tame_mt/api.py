@@ -7,6 +7,7 @@ from tame_mt.artifacts import validate_segment_artifacts
 from tame_mt.bins import (
     ALL_GROUP,
     TM_GROUP,
+    assign_bin_values,
     build_bin_group_index,
     build_bin_reports,
     compute_generalization_gap,
@@ -60,6 +61,7 @@ class CachedSegmentScorer:
             exposures,
             tm_results,
         )
+        _validate_cached_bins(validated_exposures, self.config)
         self.exposures = [replace(segment) for segment in validated_exposures]
         self.tm_results = [replace(result) for result in validated_tm_results]
         self.refs = [list(ref) for ref in refs]
@@ -419,6 +421,23 @@ def audit(
 
 def _empty_metric_scores(config: ScoreConfig) -> dict[str, float | None]:
     return {metric: None for metric in config.metrics}
+
+
+def _validate_cached_bins(exposures: list[SegmentExposure], config: ScoreConfig) -> None:
+    for segment in exposures:
+        expected_bin = assign_bin_values(
+            segment.source_exact,
+            segment.source_exposure,
+            config.bins,
+        )
+        if segment.bin != expected_bin:
+            raise InputDataError(
+                "cached segment bin mismatch at index "
+                f"{segment.index}: artifact has {segment.bin!r}, but current bin "
+                f"thresholds classify source_exposure={segment.source_exposure:.6g} "
+                f"as {expected_bin!r}. Re-run the audit or score-cached with the same "
+                "bin thresholds used to create the segment JSONL."
+            )
 
 
 def _build_cached_report(
