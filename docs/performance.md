@@ -22,6 +22,13 @@ The Rust extension is the only retrieval engine. A missing native backend is an
 installation error, not a production fallback. Approximate `native_fast` must be
 requested with `--retrieval approx --allow-approximate`.
 
+`native_exact` uses compact integer n-gram postings and releases the GIL for
+batch retrieval. Exact batch queries reuse vector-backed per-worker workspaces
+for candidate counts and touched document IDs, avoiding per-query candidate-map
+allocation. Query grams are processed by increasing document frequency, and
+top-k exact search uses the Jaccard length upper bound to skip candidates that
+cannot beat the current frontier.
+
 `native_fast` is approximate for nearest-neighbor retrieval. It selects rare
 query n-grams, reads bounded postings, keeps a bounded candidate set, and reranks
 that shortlist with exact Jaccard similarity. Exact source and exact pair
@@ -43,6 +50,12 @@ score-gap ceilings. This is not a proof that every corpus is recall-safe; it is
 a regression test that the approximate path stays characterized instead of
 drifting silently. CI also runs a larger non-matrix staged benchmark so obvious
 performance regressions fail before release.
+
+Release acceptance also includes `benchmarks/validate_threshold_exact.py`, which
+checks that exact threshold flags and exact source-bin decisions match exact
+top-1 retrieval across boundary, template-heavy, and short-string cases. The
+threshold API refuses `native_fast`, so no-false-negative threshold decisions are
+not accidentally computed from approximate candidate sets.
 
 ## Recommended Workflow
 
@@ -66,8 +79,12 @@ tame-mt audit \
 
 This skips native source/target index construction on later runs. The bundle is
 a low-compression zip container tuned for much smaller cache files while keeping
-load time low. It stores raw training text and normalized exact-match and pair
-keys, so treat it as training data.
+load time low. It stores raw training text plus exact-match and pair
+fingerprints, so treat it as training data.
+For exact bundles, query-time settings such as pair reranking `topk` and
+retrieval batch size can change without rebuilding the index. Rebuild when
+normalization, n-gram/similarity settings, backend mode, or fast-mode caps
+change.
 
 Use cached segment diagnostics when the train/test/reference setup is fixed and
 only system outputs change. Run the train-aware audit once:
@@ -78,7 +95,7 @@ tame-mt audit \
   --train-tgt train.tgt \
   --test-src test.src \
   --ref test.ref \
-  --segment-out segments.jsonl \
+  --cache-out segments.tamecache \
   --json-out audit.json
 ```
 
@@ -86,15 +103,21 @@ Then score every system output from cached diagnostics:
 
 ```bash
 tame-mt score-cached \
-  --segment-in segments.jsonl \
+  --cache-in segments.tamecache \
   --ref test.ref \
   --hyp system.out \
-  --num-train 50000 \
   --json-out system.tame.json
 ```
 
 This makes each additional system close to ordinary BLEU/chrF cost because the
 training-corpus retrieval has already been done.
+
+Exact pair-threshold rates are available with `--exact-pair-thresholds`. They
+check same-index source/target threshold matches without false negatives, but
+they can be much more expensive than top-k pair reranking because they may need
+to score many aligned training pairs per test segment. Use them for
+paper-critical PairLeakExact columns or smaller audits; keep `PairLeakTopK`
+when you need fast exploratory pair-exposure estimates.
 
 ## Local Smoke Timing
 
@@ -105,21 +128,23 @@ benchmark numbers.
 
 | Step | Backend | Time |
 | --- | --- | ---: |
-| Synthetic 100k train / 2k test, fresh audit | `native_exact` | ~35.0s |
+| Synthetic 100k train / 2k test, fresh audit | `native_exact` | ~4.3s |
 | Synthetic 100k train / 2k test, one-time compressed index build | `native_exact` | ~4.0s |
-| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_exact`, reused index | ~43.2s |
-| Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.5s |
+| Synthetic 100k train / 2k test, indexed audit after `.tameidx` load | `native_exact`, reused index | ~2.2s |
+| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_exact`, reused index | ~4.4s |
+| Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.4s |
 | Synthetic 100k train / 2k test, prepared cached hypothesis scoring | cached diagnostics | ~0.2s |
-| Public demo after download cache | `native_fast` | ~5.7s |
-| Direct CLI audit on prepared files | `native_fast` | ~6.4s |
+| Synthetic 1M train / 2k test, fresh audit with `--threads 8` | `native_exact` | ~45.4s |
+| Synthetic 1M train / 2k test, one-time compressed index build with `--threads 8` | `native_exact` | ~39.8s |
+| Synthetic 1M train / 2k test, indexed audit after `.tameidx` load with `--threads 8` | `native_exact`, reused index | ~23.4s |
+| Synthetic 1M train / 2k test, load + audit from `.tameidx` with `--threads 8` | `native_exact`, reused index | ~47.3s |
+| `tame-mt demo opus100 --quick --retrieval exact` after download cache | `native_exact` | ~0.6s |
+| `tame-mt demo opus100 --standard --pair de-en --retrieval exact` after download cache | `native_exact` | ~3.2s |
+| Four-pair OPUS-100 standard demo after download cache | `native_exact` | ~9.9s |
 | `score-cached` for one hypothesis | cached diagnostics | ~1.8s |
-| Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
-| OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
-| OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
-| OPUS-100 `de-en`, 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.8s |
-| Synthetic 100k train / 2k test, one-time compressed index build | `native_fast` | ~4.0s |
-| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.4s |
+| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.9s |
+| Synthetic 100k train / 2k test, one-time compressed index build | `native_fast` | ~4.3s |
+| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.7s |
 | Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.4s |
 | Synthetic 100k train / 2k test, prepare cached scorer | cached diagnostics | ~0.3s |
 | Synthetic 100k train / 2k test, prepared cached hypothesis scoring | cached diagnostics | ~0.2s |
@@ -132,8 +157,19 @@ benchmark numbers.
 
 When publishing benchmark tables, report the machine, corpus size, backend, and
 full TAME-MT signature.
+The committed synthetic smoke summary for the table above is
+`benchmarks/results/synthetic_100k_2k_2026-06-27.summary.json`, with a readable
+Markdown companion in the same directory. Peak RSS in the current committed
+summary is about 516 MB for exact and 495 MB for approximate.
+The 1M synthetic stress result is stored in
+`benchmarks/results/synthetic_1m_2k_2026-06-27.summary.json`, with a readable
+Markdown companion in the same directory. It passed the 60s fresh-audit stress
+target on the machine above with `--threads 8`. Peak RSS in the current
+committed summary is about 3.94 GiB for audit-only and 3.91 GiB for staged
+audit after avoiding retained Python normalized training copies in fresh and
+persisted-index paths.
 The synthetic 100k source+target `.tameidx` bundle in the table above is about
-78 MB with low-compression ZIP storage. The same payload was about 323 MB when
+79 MB with low-compression ZIP storage. The same payload was about 323 MB when
 stored uncompressed, so acceptance checks now include a bundle-size ceiling as
 well as runtime ceilings.
 
@@ -155,15 +191,20 @@ per-segment result objects use slotted dataclasses to reduce memory pressure,
 evaluation retrieval runs in configurable chunks, and exposure summaries collect
 source/target/pair scores in one pass before sorting each side once. Threshold
 counts then use binary search over the sorted scores instead of rescanning every
-segment for each threshold. Fresh native audits also release Python-side
-normalized training-line copies after exact pair keys are prepared; the Rust
+segment for each threshold. Fresh native audits avoid retaining Python-side
+normalized training-line copies after native index construction; pair
+fingerprints and persisted-index normalized hashes are built with streaming
+normalization rather than retained full normalized training lists. The Rust
 indexes keep the state needed for exact checks and nearest-neighbor queries.
-Native maps use Rust's randomized default hashing rather than a fixed public
-hash, reducing collision-DoS exposure when indexing untrusted text.
+Exact-match maps store fixed-size BLAKE3
+fingerprints instead of full normalized strings, reducing memory pressure at
+large training sizes. Native gram maps still use Rust's randomized default
+hashing rather than a fixed public hash, reducing collision-DoS exposure when
+indexing untrusted text.
 
 For large indexed runs, `score --index` and `audit --index` enforce a default
 uncompressed bundle load budget before reading raw training text, native index
-bytes, or exact-pair keys into memory. Raise `--max-index-load-bytes` only for a
+bytes, or exact-pair fingerprints into memory. Raise `--max-index-load-bytes` only for a
 trusted `.tameidx` bundle on a machine with enough RAM. Lower `--batch-size`
 when test/reference retrieval batches need a smaller peak memory footprint.
 

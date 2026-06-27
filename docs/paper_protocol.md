@@ -24,6 +24,11 @@ approximate nearest-neighbor retrieval with exact Jaccard reranking of a bounded
 rare-gram candidate shortlist, report `tm_retrieval_exact=false`, and label pair
 thresholds as `PairLeakTopK`, not exact `PairLeak`.
 
+If `--exact-pair-thresholds` is used, also report `PairLeakExact@t`. Keep it in
+a separate column from `PairLeakTopK@t`, because the former is no-false-negative
+threshold detection while the latter is a top-k reranking estimate of pair
+exposure.
+
 ## Recommended Table Columns
 
 ```text
@@ -34,6 +39,7 @@ TM-BLEU
 delta TM-BLEU
 MeanSourceExposure
 PairLeakTopK@0.85
+PairLeakExact@0.85, if computed
 TM retrieval exact?
 Retrieval signature
 Far-BLEU

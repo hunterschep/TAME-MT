@@ -10,7 +10,7 @@ from tame_mt.config import ScoreConfig
 from tame_mt.exceptions import OutputError
 from tame_mt.io import ensure_parent_dir, open_text
 from tame_mt.json_utils import strict_json_dumps
-from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
+from tame_mt.schema import SCHEMA_VERSION, SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.version import __version__
 
 SEGMENT_METADATA_SUFFIX = ".meta.json"
@@ -28,7 +28,8 @@ def build_signature(config: ScoreConfig, backend_name: str | None = None) -> str
         f"retrieval:{config.retrieval.mode}|approx:{int(config.retrieval.mode == 'approx')}|"
         f"idx:{config.index.mode}|backend:{backend}|tm:src_nn_top1_zero_{config.tm.zero_policy}|"
         f"bins:far{config.bins.far_threshold:.2f}_near{config.bins.near_threshold:.2f}_leak{leaks}|"
-        f"pair_k:{config.index.topk}|fast:{config.index.candidate_gram_limit},"
+        f"pair_k:{config.index.topk}|pair_exact:{int(config.pair.exact_thresholds)}|"
+        f"fast:{config.index.candidate_gram_limit},"
         f"{config.index.posting_limit},{config.index.max_candidates},"
         f"{config.index.rerank_limit}|metrics:{metrics}|"
         f"sacrebleu:bleu_tok_{config.metric.bleu_tokenize}_lc_{int(config.metric.bleu_lowercase)}_"
@@ -55,7 +56,11 @@ def config_to_dict(config: ScoreConfig) -> dict[str, Any]:
             "leak_thresholds": list(config.bins.leak_thresholds),
             "min_bin_size_warning": config.bins.min_bin_size_warning,
         },
-        "pair": {"pair_k": config.index.topk, "mode": "topk_rerank"},
+        "pair": {
+            "pair_k": config.index.topk,
+            "mode": "topk_rerank",
+            "exact_thresholds": config.pair.exact_thresholds,
+        },
         "tm": asdict(config.tm),
         "metrics": list(config.metrics),
         "sacrebleu": asdict(config.metric),
@@ -186,6 +191,7 @@ def write_segment_jsonl(
                 "pair_nn_index": segment.pair_nn_index,
                 "pair_ref_index": segment.pair_ref_index,
                 "pair_exact": segment.pair_exact,
+                "pair_exact_at_threshold": segment.pair_exact_at_threshold,
                 "bin": segment.bin,
                 "tm_source_index": tm_result.tm_source_index if tm_result else None,
                 "tm_source_similarity": tm_result.tm_source_similarity if tm_result else None,
@@ -223,7 +229,7 @@ def _segment_metadata_payload(
     neighbor_text_included: bool,
 ) -> dict[str, Any]:
     return {
-        "schema_version": "0.1",
+        "schema_version": SCHEMA_VERSION,
         "artifact": "segment_jsonl",
         "tame_version": report.tame_version,
         "signature": report.signature,
@@ -312,6 +318,9 @@ def _render_pair_exposure(stats: dict[str, Any], pair_mode: str) -> list[str]:
     label = "PairLeakTopK" if "topk" in pair_mode else "PairLeak"
     for threshold, value in thresholds.items():
         lines.append(f"  {label}@{threshold}:   {_fmt_pct(value)}")
+    exact_thresholds = stats.get("exact_at_threshold") or {}
+    for threshold, value in exact_thresholds.items():
+        lines.append(f"  PairLeakExact@{threshold}: {_fmt_pct(value)}")
     lines.append("")
     return lines
 

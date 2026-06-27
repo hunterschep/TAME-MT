@@ -1,8 +1,8 @@
 import pytest
 
 from tame_mt.config import IndexConfig, NormalizationConfig, SimilarityConfig
-from tame_mt.exceptions import BackendError
-from tame_mt.index import NgramInvertedIndex
+from tame_mt.exceptions import ApproximationError, BackendError, ConfigurationError
+from tame_mt.index import NgramInvertedIndex, PythonExactSimilarityIndex
 from tame_mt.similarity import text_similarity
 
 
@@ -44,7 +44,7 @@ def test_index_auto_remains_exact_for_larger_corpora() -> None:
 
 
 def test_index_auto_requires_native_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tame_mt.index.is_native_available", lambda: False)
+    monkeypatch.setattr("tame_mt.index.modes.is_native_available", lambda: False)
 
     with pytest.raises(BackendError, match="native Rust backend is required"):
         NgramInvertedIndex.build(["abcdef"], index_config=IndexConfig(mode="auto"))
@@ -113,6 +113,35 @@ def test_native_exact_matches_metric_definition() -> None:
     assert native_index.score_candidates(query, [0, 1, 2, 3]) == expected_scores
 
 
+def test_python_exact_reference_matches_native_exact() -> None:
+    lines = [
+        "alpha beta gamma",
+        "alpha beta delta",
+        "mañana será otro día",
+        "測試 句子 甲",
+        "नमस्ते दुनिया",
+        "",
+    ]
+    queries = [
+        "alpha beta gamma",
+        "alpha beta epsilon",
+        "mañana sera otro dia",
+        "測試 句子 乙",
+        "नमस्ते संसार",
+        "",
+    ]
+    native_index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="native_exact"))
+    python_index = PythonExactSimilarityIndex(lines)
+
+    assert python_index.backend_info.name == "python_exact"
+    assert python_index.backend_info.exact is True
+    assert python_index.backend_info.native is False
+    assert python_index.batch_query_topk(queries, 4) == native_index.batch_query_topk(queries, 4)
+    assert python_index.score_candidates(queries[1], [0, 1, 2, 3]) == native_index.score_candidates(
+        queries[1], [0, 1, 2, 3]
+    )
+
+
 def test_native_exact_orders_seeded_unicode_corpus_by_metric_definition() -> None:
     lines = [
         "alpha beta gamma",
@@ -175,6 +204,144 @@ def test_score_candidates_matches_single_candidate_scoring() -> None:
     assert bulk_scores == single_scores
 
 
+def test_exact_threshold_flags_match_exact_top1_scores() -> None:
+    lines = [
+        "alpha beta gamma",
+        "alpha beta delta",
+        "unrelated sentence",
+        "shared boilerplate rare token one",
+    ]
+    queries = [
+        "alpha beta gamma",
+        "alpha beta epsilon",
+        "shared boilerplate rare token two",
+        "no overlap",
+    ]
+    thresholds = (0.30, 0.70, 0.85, 0.95)
+    index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="native_exact"))
+
+    flags = index.batch_threshold_flags(queries, thresholds)
+    best_above = {threshold: index.batch_best_above(queries, threshold) for threshold in thresholds}
+
+    for query, row_index in zip(queries, range(len(queries)), strict=True):
+        exact_best = index.query_best(query)
+        for threshold in thresholds:
+            expected = exact_best.score >= threshold
+            assert flags[row_index][threshold] is expected
+            if expected:
+                assert best_above[threshold][row_index] == exact_best
+            else:
+                assert best_above[threshold][row_index] is None
+
+
+def test_exact_source_bins_match_threshold_semantics() -> None:
+    lines = [
+        "alpha beta gamma",
+        "alpha beta delta",
+        "short abc",
+        "completely unrelated",
+    ]
+    queries = [
+        "alpha beta gamma",
+        "alpha beta epsilon",
+        "short abd",
+        "zzzz qqqq",
+    ]
+    index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="native_exact"))
+
+    bins = index.batch_source_bins_exact(
+        queries,
+        far_threshold=0.30,
+        near_threshold=0.70,
+    )
+    best_scores = [index.query_best(query) for query in queries]
+
+    assert bins[0] == "source_exact"
+    for bin_name, best in zip(bins[1:], best_scores[1:], strict=True):
+        if best.score >= 0.70:
+            assert bin_name == "near"
+        elif best.score >= 0.30:
+            assert bin_name == "medium"
+        else:
+            assert bin_name == "far"
+
+
+def test_exact_threshold_apis_reject_approximate_backend() -> None:
+    index = NgramInvertedIndex.build(
+        ["alpha beta gamma", "alpha beta delta"],
+        index_config=IndexConfig(mode="native_fast"),
+    )
+
+    with pytest.raises(ApproximationError, match="require native_exact"):
+        index.batch_threshold_flags(["alpha beta"], (0.70,))
+    with pytest.raises(ApproximationError, match="require native_exact"):
+        index.batch_best_above(["alpha beta"], 0.70)
+    with pytest.raises(ApproximationError, match="require native_exact"):
+        index.batch_source_bins_exact(
+            ["alpha beta"],
+            far_threshold=0.30,
+            near_threshold=0.70,
+        )
+
+
+def test_exact_pair_threshold_flags_match_same_index_pair_threshold() -> None:
+    source_index = NgramInvertedIndex.build(
+        [
+            "shared segment with many common words and token one",
+            "shared segment with many common words and token two",
+            "unrelated source text",
+        ],
+        index_config=IndexConfig(mode="native_exact"),
+    )
+    target_index = NgramInvertedIndex.build(
+        [
+            "unrelated target text",
+            "the quick brown fox jumps over the lazy cat",
+            "the quick brown fox jumps over the lazy dog",
+        ],
+        index_config=IndexConfig(mode="native_exact"),
+    )
+
+    flags = source_index.pair_threshold_flags_exact(
+        target_index,
+        "shared segment with many common words and token one",
+        ["the quick brown fox jumps over the lazy dog"],
+        (0.85, 0.95),
+    )
+
+    assert flags == {"0.85": True, "0.95": False}
+
+
+def test_exact_pair_threshold_flags_reject_approximate_backend() -> None:
+    source_index = NgramInvertedIndex.build(
+        ["alpha beta gamma", "alpha beta delta"],
+        index_config=IndexConfig(mode="native_fast"),
+    )
+    target_index = NgramInvertedIndex.build(
+        ["uno dos tres", "uno dos cuatro"],
+        index_config=IndexConfig(mode="native_exact"),
+    )
+
+    with pytest.raises(ApproximationError, match="require native_exact"):
+        source_index.pair_threshold_flags_exact(
+            target_index,
+            "alpha beta gamma",
+            ["uno dos tres"],
+            (0.70,),
+        )
+
+
+def test_exact_threshold_apis_validate_thresholds() -> None:
+    index = NgramInvertedIndex.build(["alpha beta"], index_config=IndexConfig(mode="native_exact"))
+
+    with pytest.raises(ConfigurationError, match="thresholds must contain"):
+        index.batch_threshold_flags(["alpha"], ())
+    with pytest.raises(ConfigurationError, match="between 0 and 1"):
+        index.batch_best_above(["alpha"], 1.1)
+    with pytest.raises(ConfigurationError, match="far_threshold"):
+        index.batch_source_bins_exact(["alpha"], far_threshold=0.8, near_threshold=0.7)
+
+
 def test_native_index_bytes_roundtrip_when_available() -> None:
     native_module = pytest.importorskip("tame_mt._native")
     lines = ["abcdef", "uvwxyz", "abcxyz", "नमस्ते दुनिया"]
@@ -202,6 +369,51 @@ def test_native_index_bytes_roundtrip_when_available() -> None:
     assert restored.query_topk("abcdeg", 3) == index.query_topk("abcdeg", 3)
     assert restored.batch_query_topk(["abcdeg", "नमस्ते दुनिया"], 2) == index.batch_query_topk(
         ["abcdeg", "नमस्ते दुनिया"], 2
+    )
+
+
+def test_native_exposes_explicit_exact_and_fast_topk_methods() -> None:
+    native_module = pytest.importorskip("tame_mt._native")
+    lines = [
+        "domain 0 shared sentence alpha tail",
+        "domain 1 shared sentence beta tail",
+        "domain 2 unrelated text",
+        "mañana será otro día",
+    ]
+    queries = [
+        "domain 0 shared sentence alpha tale",
+        "domain 1 shared sentence beta tail",
+        "mañana sera otro dia",
+    ]
+    exact_native = native_module.NativeNgramIndex(
+        lines,
+        [3, 4, 5],
+        "exact",
+        1_000,
+        1_000,
+        1_000,
+        1_000,
+    )
+    fast_native = native_module.NativeNgramIndex(
+        lines,
+        [3, 4, 5],
+        "fast",
+        1_000,
+        1_000,
+        1_000,
+        1_000,
+    )
+
+    exact_batch = exact_native.batch_query_topk_exact(queries, 3)
+    exact_single = [exact_native.query_topk_exact(query, 3) for query in queries]
+    default_exact_batch = exact_native.batch_query_topk(queries, 3)
+    fast_batch = fast_native.batch_query_topk_fast(queries, 3)
+
+    assert exact_batch == exact_single
+    assert default_exact_batch == exact_batch
+    assert fast_batch == exact_batch
+    assert fast_native.query_topk_fast(queries[0], 3) == exact_native.query_topk_exact(
+        queries[0], 3
     )
 
 

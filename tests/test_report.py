@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 import sacrebleu
 
-from tame_mt import RetrievalConfig, ScoreConfig, TameScorer
+from tame_mt import BinConfig, IndexConfig, PairConfig, RetrievalConfig, ScoreConfig, TameScorer
 from tame_mt.artifacts import read_segment_jsonl
 from tame_mt.exceptions import OutputError
-from tame_mt.report import write_json_report, write_segment_jsonl
+from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
 from tame_mt.version import __version__
 
 
@@ -21,7 +21,7 @@ def test_report_to_json_contains_schema_version() -> None:
         hyp=["hola mundo"],
     )
     payload = json.loads(report.to_json())
-    assert payload["schema_version"] == "0.1"
+    assert payload["schema_version"] == "1.0"
     assert payload["signature"].startswith(f"tame-mt|v:{__version__}|")
     assert f"|deps:sacrebleu_{sacrebleu.__version__}" in payload["signature"]
     assert payload["config"]["dependencies"]["sacrebleu"] == sacrebleu.__version__
@@ -56,6 +56,41 @@ def test_approximate_report_is_labeled_and_warns() -> None:
     assert payload["retrieval"]["tm_retrieval_exact"] is False
     assert any("Approximate retrieval is enabled" in warning for warning in payload["warnings"])
     assert "|retrieval:approx|" in payload["signature"]
+
+
+def test_report_separates_pair_topk_and_exact_threshold_rates() -> None:
+    test_source = "shared segment with many common words and token one"
+    ref = "the quick brown fox jumps over the lazy dog"
+    report = TameScorer(
+        ScoreConfig(
+            index=IndexConfig(topk=1),
+            bins=BinConfig(leak_thresholds=(0.85,)),
+            pair=PairConfig(exact_thresholds=True),
+        )
+    ).score_corpus(
+        train_src=[
+            test_source,
+            "shared segment with many common words and token two",
+            "unrelated source text",
+        ],
+        train_tgt=[
+            "unrelated target text",
+            "the quick brown fox jumps over the lazy cat",
+            ref,
+        ],
+        test_src=[test_source],
+        refs=[[ref]],
+        hyp=[ref],
+    )
+    payload = json.loads(report.to_json())
+    rendered = render_text_report(report)
+
+    assert payload["retrieval"]["pair_exposure_mode"] == "topk_rerank+threshold_exact"
+    assert payload["exposure"]["pair"]["at_threshold"]["0.85"] == 0.0
+    assert payload["exposure"]["pair"]["exact_at_threshold"]["0.85"] == 1.0
+    assert "PairLeakTopK@0.85" in rendered
+    assert "PairLeakExact@0.85" in rendered
+    assert "|pair_exact:1|" in payload["signature"]
 
 
 def test_report_to_json_rejects_non_finite_numbers() -> None:

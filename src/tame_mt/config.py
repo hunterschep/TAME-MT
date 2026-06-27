@@ -117,6 +117,14 @@ class BinConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PairConfig:
+    exact_thresholds: bool = False
+
+    def __post_init__(self) -> None:
+        _require_bool("exact_thresholds", self.exact_thresholds)
+
+
+@dataclass(frozen=True, slots=True)
 class TMConfig:
     zero_policy: str = "empty"
 
@@ -148,6 +156,7 @@ class ScoreConfig:
     index: IndexConfig = field(default_factory=IndexConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     bins: BinConfig = field(default_factory=BinConfig)
+    pair: PairConfig = field(default_factory=PairConfig)
     tm: TMConfig = field(default_factory=TMConfig)
     metric: MetricConfig = field(default_factory=MetricConfig)
 
@@ -157,9 +166,15 @@ class ScoreConfig:
         _require_config_type("index", self.index, IndexConfig)
         _require_config_type("retrieval", self.retrieval, RetrievalConfig)
         _require_config_type("bins", self.bins, BinConfig)
+        _require_config_type("pair", self.pair, PairConfig)
         _require_config_type("tm", self.tm, TMConfig)
         _require_config_type("metric", self.metric, MetricConfig)
         _normalize_retrieval_index_pair(self)
+        if self.pair.exact_thresholds and self.retrieval.mode == "approx":
+            raise ConfigurationError(
+                "pair exact_thresholds require exact retrieval; approximate candidate search "
+                "can miss pair-threshold matches"
+            )
         if isinstance(self.metrics, str) or not isinstance(self.metrics, Sequence):
             raise ConfigurationError("metrics must be a sequence of metric names")
         normalized_metrics: list[str] = []

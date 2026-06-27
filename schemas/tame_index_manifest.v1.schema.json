@@ -152,17 +152,17 @@
       "additionalProperties": false,
       "required": [
         "stores_raw_training_text",
-        "stores_normalized_exact_match_keys",
-        "stores_normalized_pair_keys"
+        "stores_exact_match_fingerprints",
+        "stores_pair_fingerprints"
       ],
       "properties": {
         "stores_raw_training_text": {
           "type": "boolean"
         },
-        "stores_normalized_exact_match_keys": {
+        "stores_exact_match_fingerprints": {
           "type": "boolean"
         },
-        "stores_normalized_pair_keys": {
+        "stores_pair_fingerprints": {
           "type": "boolean"
         }
       }

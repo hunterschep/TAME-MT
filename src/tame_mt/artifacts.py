@@ -1,21 +1,129 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 from typing import Any, TypeVar
 
 from tame_mt.config import ScoreConfig
-from tame_mt.exceptions import ConfigurationError, InputDataError
+from tame_mt.exceptions import ArtifactValidationError, ConfigurationError, InputDataError
 from tame_mt.io import open_text
 from tame_mt.json_utils import strict_json_dumps, strict_json_loads
 from tame_mt.normalize import normalize_text
 from tame_mt.report import SEGMENT_METADATA_SUFFIX, config_to_dict
-from tame_mt.schema import SegmentExposure, SegmentTMResult
+from tame_mt.schema import SCHEMA_VERSION, SegmentExposure, SegmentTMResult
 
 SegmentRow = TypeVar("SegmentRow", SegmentExposure, SegmentTMResult)
 VALID_SEGMENT_BINS = frozenset({"source_exact", "near", "medium", "far"})
-SEGMENT_METADATA_SCHEMA_VERSION = "0.1"
+SEGMENT_METADATA_SCHEMA_VERSION = SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class CachedArtifact:
+    """Validated segment diagnostics and metadata for cached scoring."""
+
+    exposures: list[SegmentExposure]
+    tm_results: list[SegmentTMResult]
+    metadata: dict[str, Any] | None
+    num_train: int
+    artifact_backend: dict[str, Any] | None = None
+
+
+def load_cached_artifact(
+    path: str | Path,
+    *,
+    refs: list[list[str]],
+    config: ScoreConfig | None = None,
+    num_train: int | None = None,
+    allow_unsafe_no_metadata: bool = False,
+    allow_reference_hash_mismatch: bool = False,
+    require_tm_text: bool = True,
+) -> CachedArtifact:
+    """Load a cached segment artifact with the same safety checks as the CLI."""
+
+    score_config = config or ScoreConfig()
+    exposures, tm_results = read_segment_jsonl(path)
+    metadata = read_segment_metadata(path)
+    resolved_num_train = resolve_cached_num_train(
+        num_train=num_train,
+        metadata=metadata,
+        allow_unsafe_no_metadata=allow_unsafe_no_metadata,
+    )
+    if metadata is not None:
+        validate_segment_metadata(
+            metadata,
+            config=score_config,
+            num_train=resolved_num_train,
+            num_test=len(exposures),
+            num_refs=len(refs),
+            refs=refs,
+            tm_results=tm_results,
+            allow_reference_hash_mismatch=allow_reference_hash_mismatch,
+            require_tm_text=require_tm_text,
+        )
+    return CachedArtifact(
+        exposures=[replace(segment) for segment in exposures],
+        tm_results=[replace(result) for result in tm_results],
+        metadata=dict(metadata) if metadata is not None else None,
+        num_train=resolved_num_train,
+        artifact_backend=artifact_backend_from_metadata(metadata),
+    )
+
+
+def resolve_cached_num_train(
+    *,
+    num_train: int | None,
+    metadata: dict[str, Any] | None,
+    allow_unsafe_no_metadata: bool = False,
+) -> int:
+    """Resolve and validate the training count for cached scoring."""
+
+    if metadata is None:
+        if not allow_unsafe_no_metadata:
+            raise ArtifactValidationError(
+                "segment metadata sidecar is required for cached scoring; pass "
+                "allow_unsafe_no_metadata=True only for legacy artifacts you trust"
+            )
+        if num_train is None:
+            raise ArtifactValidationError("num_train is required when segment metadata is missing")
+        _validate_positive_num_train(num_train)
+        return num_train
+
+    metadata_num_train = metadata_num_train_value(metadata)
+    if num_train is not None:
+        _validate_positive_num_train(num_train)
+        if num_train != metadata_num_train:
+            raise ConfigurationError(
+                f"num_train {num_train} does not match segment metadata num_train "
+                f"{metadata_num_train}"
+            )
+    _validate_positive_num_train(metadata_num_train)
+    return metadata_num_train
+
+
+def metadata_num_train_value(metadata: dict[str, Any]) -> int:
+    data = metadata.get("data")
+    if not isinstance(data, dict):
+        raise ArtifactValidationError("segment metadata data field is required")
+    value = data.get("num_train")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ArtifactValidationError("segment metadata data.num_train must be an integer")
+    return value
+
+
+def artifact_backend_from_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    if metadata is None:
+        return None
+    backend = metadata.get("backend")
+    if isinstance(backend, dict):
+        return dict(backend)
+    return None
+
+
+def _validate_positive_num_train(num_train: int) -> None:
+    if num_train <= 0:
+        raise ArtifactValidationError("num_train must be positive")
 
 
 def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[SegmentTMResult]]:
@@ -301,6 +409,9 @@ def _segment_exposure_from_payload(payload: dict[str, Any], line_number: int) ->
             bin=_required_bin(payload["bin"]),
             target_ref_index=_optional_int(payload.get("target_ref_index")),
             pair_ref_index=_optional_int(payload.get("pair_ref_index")),
+            pair_exact_at_threshold=_optional_bool_map(
+                payload.get("pair_exact_at_threshold"),
+            ),
         )
     except KeyError as exc:
         raise InputDataError(f"segment JSONL line {line_number} is missing field {exc}") from exc
@@ -412,6 +523,19 @@ def _optional_bool(value: object) -> bool | None:
     if isinstance(value, int) and value in {0, 1}:
         return bool(value)
     raise InputDataError(f"expected bool-compatible value, got {type(value).__name__}")
+
+
+def _optional_bool_map(value: object) -> dict[str, bool] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise InputDataError(f"expected object value, got {type(value).__name__}")
+    parsed: dict[str, bool] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise InputDataError("expected object keys to be strings")
+        parsed[key] = _required_bool(item)
+    return parsed
 
 
 def _optional_str(value: object) -> str | None:

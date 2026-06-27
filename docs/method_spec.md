@@ -86,6 +86,13 @@ TAME-MT currently computes pair exposure by reranking a top-k candidate set from
 source and target retrieval. This is not an all-pairs exact threshold search.
 Reports therefore label threshold rates as `PairLeakTopK@t`.
 
+If `exact_pair_thresholds` is enabled, TAME-MT also computes
+`PairLeakExact@t` for the configured leak thresholds. For each test segment,
+the exact flag is true if there exists a training index `j` and reference `r`
+such that both `sim(x_i,u_j) >= t` and `sim(r_i,v_j) >= t`. This has no false
+negatives for that threshold and is reported separately from top-k pair
+exposure because it may be substantially slower.
+
 Exact pair overlap is separate and exact: it checks whether the normalized
 source/reference pair appears exactly as a normalized training source/target
 pair.
@@ -157,8 +164,12 @@ provide no-false-negative threshold flags for official source bins and leak
 thresholds. If a run reports only threshold-safe bounds instead of exact maximum
 scores, the report must say so in `source_exposure_mode`.
 
-The current implementation maps paper-facing defaults to exact retrieval until
-threshold-safe guarded search is implemented.
+The current implementation exposes exact threshold APIs on `native_exact`:
+`batch_best_above`, `batch_threshold_flags`, and `batch_source_bins_exact`.
+These derive threshold decisions from exact nearest-neighbor scores, so they
+have no false negatives. They are conservative correctness APIs, not a separate
+optimized guarded retrieval mode yet; paper-facing defaults still use exact
+retrieval for reported source-exposure scores.
 
 ### approx
 

@@ -6,7 +6,7 @@ import pytest
 
 import tame_mt.persistence as persistence
 from tame_mt.api import TameScorer
-from tame_mt.config import IndexConfig, RetrievalConfig, ScoreConfig
+from tame_mt.config import IndexConfig, NormalizationConfig, RetrievalConfig, ScoreConfig
 from tame_mt.exceptions import ConfigurationError
 from tame_mt.persistence import (
     FORMAT_VERSION,
@@ -56,7 +56,8 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     assert manifest["hashes"]["target_index_sha256"]
     assert manifest["hashes"]["exact_pair_keys_sha256"]
     assert manifest["privacy"]["stores_raw_training_text"] is True
-    assert manifest["privacy"]["stores_normalized_pair_keys"] is True
+    assert manifest["privacy"]["stores_exact_match_fingerprints"] is True
+    assert manifest["privacy"]["stores_pair_fingerprints"] is True
     with zipfile.ZipFile(path, "r") as archive:
         assert {item.compress_type for item in archive.infolist()} == {ZIP_COMPRESSION}
 
@@ -127,6 +128,13 @@ def test_exact_pair_key_member_is_deterministic(tmp_path: Path) -> None:
         assert first_archive.read("exact_pairs.keys") == second_archive.read("exact_pairs.keys")
 
 
+def test_exact_pair_key_member_must_be_sorted() -> None:
+    unsorted_payload = (b"\x02" * 16) + (b"\x01" * 16)
+
+    with pytest.raises(ConfigurationError, match="not sorted"):
+        persistence._decode_exact_pair_keys(unsorted_payload)
+
+
 def test_index_bundle_rejects_incompatible_backend_mode(tmp_path: Path) -> None:
     pytest.importorskip("tame_mt._native")
     path = tmp_path / "train.tameidx"
@@ -147,15 +155,51 @@ def test_index_bundle_rejects_incompatible_backend_mode(tmp_path: Path) -> None:
         )
 
 
-def test_scorer_rejects_bundle_loaded_with_different_config(tmp_path: Path) -> None:
+def test_scorer_allows_query_only_index_setting_changes(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef", "abcxyz"], ["alpha", "beta"], config)
+    bundle = load_index_bundle(path, config)
+
+    scorer = TameScorer(ScoreConfig(index=IndexConfig(mode="native_exact", topk=1, batch_size=1)))
+    result = scorer.evaluate_index_bundle(bundle, ["abcdef"], [["alpha"]], ["alpha"])
+
+    assert result.report.backend["index_reused"] is True
+    assert result.report.num_train == 2
+
+
+def test_scorer_rejects_bundle_loaded_with_different_normalization(tmp_path: Path) -> None:
     pytest.importorskip("tame_mt._native")
     path = tmp_path / "train.tameidx"
     config = ScoreConfig(index=IndexConfig(mode="native_exact"))
     save_index_bundle(path, ["abcdef"], ["alpha"], config)
     bundle = load_index_bundle(path, config)
 
-    scorer = TameScorer(ScoreConfig(index=IndexConfig(mode="native_exact", topk=10)))
-    with pytest.raises(ConfigurationError, match="retrieval settings"):
+    scorer = TameScorer(
+        ScoreConfig(
+            index=IndexConfig(mode="native_exact"),
+            normalization=NormalizationConfig(lowercase=True),
+        )
+    )
+    with pytest.raises(ConfigurationError, match="source index normalization"):
+        scorer.evaluate_index_bundle(bundle, ["ABCDEF"], [["alpha"]], ["alpha"])
+
+
+def test_scorer_rejects_bundle_with_incompatible_backend_mode(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    exact_config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], exact_config)
+    bundle = load_index_bundle(path, exact_config)
+
+    scorer = TameScorer(
+        ScoreConfig(
+            index=IndexConfig(mode="native_fast"),
+            retrieval=RetrievalConfig(mode="approx", allow_approximate=True),
+        )
+    )
+    with pytest.raises(ConfigurationError, match="source index backend is native_exact"):
         scorer.evaluate_index_bundle(bundle, ["abcdef"], [["alpha"]], ["alpha"])
 
 

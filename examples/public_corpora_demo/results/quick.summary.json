@@ -1,0 +1,75 @@
+{
+  "command": [
+    "tame-mt",
+    "demo",
+    "opus100",
+    "--quick",
+    "--retrieval",
+    "exact",
+    "--require-native",
+    "--output-dir",
+    "demo_runs/opus100_public_corpora",
+    "--summary-dir",
+    "examples/public_corpora_demo/results"
+  ],
+  "machine": {
+    "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
+    "machine": "arm64",
+    "native": {
+      "available": true,
+      "error": null,
+      "version": "0.2.0"
+    },
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "processor": "arm",
+    "python": "3.12.5",
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)"
+  },
+  "rows": [
+    {
+      "audit_seconds": 0.634141540969722,
+      "backend": "native_exact",
+      "backend_exact": true,
+      "direction": "de->en",
+      "exact_pair_overlap": 0.0,
+      "exact_source_overlap": 0.0,
+      "far_count": 443,
+      "far_pct": 0.886,
+      "mean_source_exposure": 0.18313821010584766,
+      "near_count": 8,
+      "pair": "de-en",
+      "pair_exposure_mode": "topk_rerank",
+      "pair_leak_topk_at_085": 0.002,
+      "retrieval": "exact",
+      "signature": "tame-mt|v:0.2.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|retrieval:exact|approx:0|idx:auto|backend:native_exact|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|pair_exact:0|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0",
+      "source_exposure_mode": "exact",
+      "source_near_dup_at_085": 0.006,
+      "test_used": 500,
+      "tm_bleu": 8.604737950888664,
+      "tm_chrf": 20.0901534612534,
+      "tm_retrieval_exact": true,
+      "train_used": 10000,
+      "warning_count": 0,
+      "warnings": []
+    }
+  ],
+  "schema_version": "1.0",
+  "settings": {
+    "allow_approximate": false,
+    "download_retries": 3,
+    "download_timeout": 60.0,
+    "index_mode": "auto",
+    "pairs": [
+      "de-en"
+    ],
+    "retrieval": "exact",
+    "test_limit": 500,
+    "threads": "auto",
+    "tier": "quick",
+    "tier_description": "one-pair laptop smoke demo",
+    "train_limit": 10000,
+    "validate_approx_sample": 0,
+    "validate_approx_seed": 13
+  },
+  "tame_version": "0.2.0"
+}

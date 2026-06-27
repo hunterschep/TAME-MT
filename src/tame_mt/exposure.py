@@ -6,7 +6,12 @@ from dataclasses import dataclass
 
 from tame_mt.bins import assign_bin_values
 from tame_mt.config import ScoreConfig
-from tame_mt.exact import build_exact_pair_keys, exact_pair_key
+from tame_mt.exact import (
+    ExactPairKeys,
+    build_exact_pair_keys,
+    contains_exact_pair_key,
+    exact_pair_key,
+)
 from tame_mt.index import IndexBackendInfo, NeighborResult, NgramInvertedIndex
 from tame_mt.normalize import normalize_text
 from tame_mt.schema import ExposureSummary, SegmentExposure
@@ -36,25 +41,27 @@ def compute_exposure_result(
     config: ScoreConfig,
     source_index: NgramInvertedIndex | None = None,
     target_index: NgramInvertedIndex | None = None,
-    exact_pair_keys: set[str] | None = None,
+    exact_pair_keys: ExactPairKeys | None = None,
 ) -> ExposureComputation:
+    needs_target_exposure = train_tgt is not None and refs is not None
+    if needs_target_exposure and exact_pair_keys is None:
+        exact_pair_keys = _build_exact_pair_keys(train_src, train_tgt, config)
     if source_index is None:
         source_index = NgramInvertedIndex.build(
             train_src,
             norm_config=config.normalization,
             sim_config=config.similarity,
             index_config=config.index,
+            keep_normalized_lines=False,
         )
-    if target_index is None and train_tgt is not None:
+    if target_index is None and needs_target_exposure:
+        assert train_tgt is not None
         target_index = NgramInvertedIndex.build(
             train_tgt,
             norm_config=config.normalization,
             sim_config=config.similarity,
             index_config=config.index,
-        )
-    if train_tgt is not None and exact_pair_keys is None:
-        exact_pair_keys = _build_exact_pair_keys(
-            train_src, train_tgt, source_index, target_index, config
+            keep_normalized_lines=False,
         )
     source_index.release_python_normalized_lines()
     if target_index is not None:
@@ -97,6 +104,17 @@ def compute_exposure_result(
             if target_index is not None and refs is not None
             else None
         )
+        exact_pair_thresholds_by_segment = (
+            _batch_pair_threshold_flags_exact(
+                normalized_test_src=normalized_test_src,
+                normalized_refs_by_ref=normalized_refs_by_ref,
+                source_index=source_index,
+                target_index=target_index,
+                thresholds=config.bins.leak_thresholds,
+            )
+            if config.pair.exact_thresholds and target_index is not None and refs is not None
+            else None
+        )
 
         for offset, source_text in enumerate(batch_sources):
             idx = batch_start + offset
@@ -114,11 +132,13 @@ def compute_exposure_result(
             target_exact = _has_exact_neighbor(target_tops) if target_index is not None else None
             pair_exact = (
                 any(
-                    exact_pair_key(
-                        normalized_test_src[offset],
-                        normalized_refs_by_ref[ref_idx][offset],
+                    contains_exact_pair_key(
+                        exact_pair_keys,
+                        exact_pair_key(
+                            normalized_test_src[offset],
+                            normalized_refs_by_ref[ref_idx][offset],
+                        ),
                     )
-                    in exact_pair_keys
                     for ref_idx in range(len(ref_texts))
                 )
                 if exact_pair_keys is not None and refs is not None
@@ -172,6 +192,11 @@ def compute_exposure_result(
                     bin=bin_name,
                     target_ref_index=target_ref_index,
                     pair_ref_index=pair_ref_index,
+                    pair_exact_at_threshold=(
+                        exact_pair_thresholds_by_segment[offset]
+                        if exact_pair_thresholds_by_segment is not None
+                        else None
+                    ),
                 )
             )
     return ExposureComputation(segments=exposures, backend=source_index.backend_info)
@@ -184,6 +209,7 @@ def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -
     target_exact_flags: list[bool] = []
     pair_scores: list[float] = []
     pair_exact_flags: list[bool] = []
+    pair_exact_threshold_rows: list[dict[str, bool]] = []
 
     for segment in exposures:
         source_scores.append(segment.source_exposure)
@@ -196,7 +222,15 @@ def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -
             pair_scores.append(segment.pair_exposure)
         if segment.pair_exact is not None:
             pair_exact_flags.append(bool(segment.pair_exact))
+        if segment.pair_exact_at_threshold is not None:
+            pair_exact_threshold_rows.append(segment.pair_exact_at_threshold)
 
+    pair_summary = _summarize_side(pair_scores, pair_exact_flags, config.bins.leak_thresholds)
+    if pair_exact_threshold_rows:
+        pair_summary["exact_at_threshold"] = _summarize_exact_threshold_rows(
+            pair_exact_threshold_rows,
+            config.bins.leak_thresholds,
+        )
     return ExposureSummary(
         source=_summarize_side(source_scores, source_exact_flags, config.bins.leak_thresholds),
         target=(
@@ -204,11 +238,7 @@ def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -
             if target_scores
             else None
         ),
-        pair=(
-            _summarize_side(pair_scores, pair_exact_flags, config.bins.leak_thresholds)
-            if pair_scores
-            else None
-        ),
+        pair=pair_summary if pair_scores else None,
     )
 
 
@@ -257,6 +287,16 @@ def _percentile_sorted(sorted_values: list[float], percentile: float) -> float:
     upper = min(lower + 1, len(sorted_values) - 1)
     weight = rank - lower
     return float(sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight)
+
+
+def _summarize_exact_threshold_rows(
+    rows: list[dict[str, bool]],
+    thresholds: tuple[float, ...],
+) -> dict[str, float]:
+    return {
+        f"{threshold:.2f}": sum(row.get(f"{threshold:.2f}", False) for row in rows) / len(rows)
+        for threshold in thresholds
+    }
 
 
 def _best_target_neighbor(
@@ -360,6 +400,27 @@ def _batch_pair_neighbors(
     )
 
 
+def _batch_pair_threshold_flags_exact(
+    normalized_test_src: list[str],
+    normalized_refs_by_ref: list[list[str]],
+    source_index: NgramInvertedIndex,
+    target_index: NgramInvertedIndex,
+    thresholds: tuple[float, ...],
+) -> list[dict[str, bool]]:
+    ref_texts_by_segment = [
+        [ref[idx] for ref in normalized_refs_by_ref] for idx in range(len(normalized_test_src))
+    ]
+    return [
+        source_index.pair_threshold_flags_exact_normalized(
+            target_index,
+            source_norm,
+            ref_texts,
+            thresholds,
+        )
+        for source_norm, ref_texts in zip(normalized_test_src, ref_texts_by_segment, strict=True)
+    ]
+
+
 def _candidate_indices(results: Iterable[NeighborResult]) -> set[int]:
     return {result.index for result in results if result.index is not None}
 
@@ -367,14 +428,10 @@ def _candidate_indices(results: Iterable[NeighborResult]) -> set[int]:
 def _build_exact_pair_keys(
     train_src: list[str],
     train_tgt: list[str] | None,
-    source_index: NgramInvertedIndex,
-    target_index: NgramInvertedIndex | None,
     config: ScoreConfig,
-) -> set[str]:
+) -> ExactPairKeys:
     if train_tgt is None:
-        return set()
-    if target_index is not None and source_index.normalized_lines and target_index.normalized_lines:
-        return build_exact_pair_keys(source_index.normalized_lines, target_index.normalized_lines)
+        return b""
     return build_exact_pair_keys(
         (normalize_text(source, config.normalization) for source in train_src),
         (normalize_text(target, config.normalization) for target in train_tgt),

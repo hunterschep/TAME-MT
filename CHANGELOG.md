@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.2.0 - 2026-06-27
+
+- Added a structured `CachedArtifact` public API and `load_cached_artifact()`
+  loader that applies the same metadata, reference-hash, TM-hypothesis, train
+  count, and privacy checks as cached CLI scoring.
+- Added first-class `--diagnostic-out`, `--cache-out`, and `--cache-in` CLI
+  artifact names so privacy-safer diagnostics are clearly separated from
+  cacheable artifacts that intentionally store TM hypotheses.
+- Added `TameScorer.prepare_from_cached_artifact()`,
+  `score_from_cached_artifact()`, and `score_many_from_cached_artifact()` so
+  services and notebooks no longer need to manually pass metadata dictionaries.
+- Refactored `score-cached` and `score-cached-batch` to use the same
+  artifact-loader validation path as the Python API, reducing validation drift.
+- Added typed `ArtifactValidationError`, `ApproximationError`, and
+  `SecurityError` exception classes for more precise downstream error handling.
+- Added exact source-threshold APIs on `native_exact` plus
+  `benchmarks/validate_threshold_exact.py` so no-false-negative threshold flags
+  and source-bin decisions are regression-tested and never computed from
+  `native_fast`.
+- Optimized native exact retrieval to reuse vector-backed per-worker query
+  workspaces instead of allocating per-query candidate maps, with deterministic
+  exact/fast native query entry points and parity tests.
+- Split the Python retrieval architecture from a flat `index.py` module into
+  `tame_mt.index` protocols, mode helpers, native wrapper, factory helper, and
+  a Python exact reference index for parity/debugging.
+- Added CLI `--threads` control for native Rayon retrieval and subprocess tests
+  proving deterministic report semantics with one thread, four threads, and the
+  default thread pool.
+- Hardened the OPUS-100 public-corpora demo with `--quick`, `--standard`, and
+  `--paper` tiers, first-class `tame-mt demo opus100` CLI access, retrying
+  downloads with timeouts, summary JSON/CSV/Markdown under
+  `examples/public_corpora_demo/results/`, and a dedicated example README.
+- Added Hypothesis property tests for Jaccard invariants, exact-match exposure,
+  batch-vs-single query parity, native-index round trips, persisted-index
+  round trips, exact threshold no-false-negative flags, and approximate-report
+  labeling.
+- Relaxed exact index-bundle compatibility for query-time settings such as
+  `topk` and `batch_size` while still rejecting normalization, similarity,
+  backend-mode, and fast-cap mismatches.
+- Tightened the local acceptance gate with locked Rust checks, Python and Rust
+  dependency audits, and clean-wheel `pip check` before smoke testing.
+- Bumped package, native crate, citation, schema examples, and README examples
+  to `0.2.0`.
+
 ## 0.1.0
 
 - Initial TAME-MT package and CLI.
@@ -47,9 +91,13 @@
   directory and replacing the output path only after the archive closes
   successfully.
 - Optimized native index reuse by avoiding duplicate Python exact maps and by
-  persisting normalized exact-pair keys for faster repeated audits.
-- Reduced native query-loop overhead by using the package's lightweight FNV
-  hasher for exact-match and per-query candidate-count maps.
+  persisting compact exact-pair fingerprints for faster repeated audits.
+- Reduced large-audit memory pressure by storing native exact-match keys and
+  Python exact-pair membership as fixed-size fingerprints instead of full
+  normalized strings.
+- Reduced 1M-train/2k-test exact audit peak RSS below the 4 GiB target on the
+  release-candidate machine by avoiding retained Python normalized training
+  copies in fresh scoring and persisted-index builds.
 - Reduced large-audit Python overhead by using slotted dataclasses for
   configs, reports, per-segment diagnostics, and internal result containers.
 - Optimized exposure-summary generation by collecting side statistics in one

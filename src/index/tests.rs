@@ -1,3 +1,4 @@
+use super::workspace::QueryWorkspace;
 use super::NativeNgramIndex;
 use crate::ngrams::char_ngram_slices;
 use crate::similarity::jaccard_ids;
@@ -46,6 +47,20 @@ fn native_index_from_bytes_accepts_valid_roundtrip() {
         restored.query_topk_impl("abcdeg", 2),
         index.query_topk_impl("abcdeg", 2)
     );
+}
+
+#[test]
+fn exact_query_workspace_can_be_reused_across_queries() {
+    let index = valid_native_index();
+    let mut workspace = QueryWorkspace::new(index.doc_count());
+    let queries = ["abcdeg", "abcxyy", "nomatch", "abcdef", "abcdeg"];
+
+    for query in queries {
+        assert_eq!(
+            index.query_topk_exact_impl(query, 2, &mut workspace),
+            index.query_topk_impl(query, 2)
+        );
+    }
 }
 
 #[test]

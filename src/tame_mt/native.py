@@ -74,6 +74,11 @@ def native_index_from_bytes(data: bytes) -> Any:
     return module.NativeNgramIndex.from_bytes(data)
 
 
+def configure_native_threads(threads: int | None) -> int:
+    module = _load_native_module()
+    return int(module.configure_native_threads(threads))
+
+
 def native_thread_count() -> int | None:
     status = native_status()
     if not status.available:

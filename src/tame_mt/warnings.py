@@ -29,12 +29,20 @@ def generate_warnings(
             "Report exact-pair overlap separately from general MT quality."
         )
 
-    pair_thresholds = pair.get("at_threshold") if isinstance(pair, dict) else None
+    pair_threshold_label = "PairExposure"
+    pair_thresholds = None
+    if isinstance(pair, dict):
+        pair_thresholds = pair.get("exact_at_threshold")
+        if isinstance(pair_thresholds, dict):
+            pair_threshold_label = "PairLeakExact"
+        else:
+            pair_thresholds = pair.get("at_threshold")
+            pair_threshold_label = "PairExposure"
     if isinstance(pair_thresholds, dict):
         pair_leak = pair_thresholds.get("0.85")
         if isinstance(pair_leak, float) and pair_leak >= 0.05:
             warnings.append(
-                f"{_pct(pair_leak)} of test pairs have PairExposure >= 0.85. "
+                f"{_pct(pair_leak)} of test pairs have {pair_threshold_label}@0.85. "
                 "Raw corpus metrics may partly reflect train-test near-duplication."
             )
 

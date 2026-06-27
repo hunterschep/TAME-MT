@@ -10,7 +10,7 @@ Machine-readable JSON Schema files live in `schemas/`:
 - `schemas/tame_cache.v1.schema.json`
 - `schemas/tame_index_manifest.v1.schema.json`
 
-The current report `schema_version` is `0.1`; the `v1` schema filenames are the
+The current report `schema_version` is `1.0`; the `v1` schema filenames are the
 public contract file names used by downstream validators while the package is
 still pre-1.0.
 
@@ -18,9 +18,9 @@ still pre-1.0.
 
 ```json
 {
-  "schema_version": "0.1",
-  "tame_version": "0.1.0",
-  "signature": "tame-mt|v:0.1.0|...",
+  "schema_version": "1.0",
+  "tame_version": "0.2.0",
+  "signature": "tame-mt|v:0.2.0|...",
   "data": {},
   "config": {},
   "retrieval": {},
@@ -208,10 +208,29 @@ Exposure summaries use fractions, not percentages:
 Target and pair exposure are `null` when the corresponding target/reference
 inputs are unavailable.
 
-## Segment JSONL
+Pair exposure may additionally contain `exact_at_threshold` when exact
+pair-threshold computation was requested:
 
-`--segment-out segments.jsonl` writes one object per test segment. By default it
-does not include raw source, reference, hypothesis, or training-neighbor text.
+```json
+{
+  "pair": {
+    "at_threshold": {
+      "0.85": 0.10
+    },
+    "exact_at_threshold": {
+      "0.85": 0.14
+    }
+  }
+}
+```
+
+## Segment Diagnostics And Cache JSONL
+
+`--diagnostic-out segments.diagnostic.jsonl` and `--cache-out segments.tamecache`
+write one object per test segment. By default, diagnostic artifacts do not
+include raw source, reference, hypothesis, training-neighbor text, or TM
+hypotheses. Cache artifacts include TM hypotheses because `score-cached` needs
+them to recompute TM-BLEU and delta over TM.
 
 ```json
 {
@@ -252,11 +271,11 @@ Raw text fields are opt-in:
 Use `.json.gz` or `.jsonl.gz` output paths to write gzip-compressed UTF-8 JSON
 reports or segment diagnostics.
 
-When `--segment-out segments.jsonl` is used, TAME-MT also writes
-`segments.jsonl.meta.json`. The sidecar records the artifact type, TAME-MT
-version, report signature, train/test/reference counts, config, and backend
-used to create the segment diagnostics. It also records privacy flags and
-content fingerprints for the metric-affecting inputs:
+When `--diagnostic-out` or `--cache-out` is used, TAME-MT also writes a
+`.meta.json` sidecar next to the JSONL artifact. The sidecar records the
+artifact type, TAME-MT version, report signature, train/test/reference counts,
+config, and backend used to create the diagnostics. It also records privacy
+flags and content fingerprints for the metric-affecting inputs:
 
 - `fingerprints.config_sha256`;
 - `fingerprints.train_src_sha256` and normalized training-source hash;
@@ -272,11 +291,11 @@ TAME-MT versions without a sidecar fail by default; pass
 `--allow-unsafe-no-metadata` only for trusted legacy artifacts whose provenance
 you have verified outside TAME-MT.
 
-Segment JSONL contains TM hypotheses by default. The metadata
-`privacy.tm_text_included` flag records whether those hypotheses are present.
-Artifacts written with `--no-tm-text-in-segments` are useful for exposure
-diagnostics but intentionally fail cached scoring, because cached TM-BLEU would
-otherwise be wrong.
+The metadata `privacy.tm_text_included` flag records whether TM hypotheses are
+present. `--diagnostic-out` sets it to `false` unless `--include-tm-text` is
+used. `--cache-out` sets it to `true`. Artifacts without TM hypotheses are
+useful for exposure diagnostics but intentionally fail cached scoring, because
+cached TM-BLEU would otherwise be wrong.
 
 Consumers should treat `index` as the authoritative original segment position.
 `score-cached` requires indices to be unique and contiguous from `0` to `N-1`

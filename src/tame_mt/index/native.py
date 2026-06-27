@@ -1,33 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from tame_mt.config import IndexConfig, NormalizationConfig, SimilarityConfig
-from tame_mt.exceptions import BackendError
+from tame_mt.exceptions import ApproximationError, BackendError, ConfigurationError
 from tame_mt.native import (
     build_native_index,
-    is_native_available,
     native_index_to_bytes,
     native_status,
 )
 from tame_mt.normalize import normalize_text
 
-
-@dataclass(frozen=True, slots=True)
-class NeighborResult:
-    index: int | None
-    score: float
-    exact: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class IndexBackendInfo:
-    name: str
-    native: bool
-    exact: bool
-    requested_mode: str
-    resolved_mode: str
+from .base import IndexBackendInfo, NeighborResult
+from .modes import (
+    native_mode,
+    resolve_mode,
+    source_bin_from_exact_score,
+    validate_thresholds,
+    validate_unit_threshold,
+    zero_neighbor_if_threshold_zero,
+)
 
 
 class NgramInvertedIndex:
@@ -60,18 +52,21 @@ class NgramInvertedIndex:
         norm_config: NormalizationConfig | None = None,
         sim_config: SimilarityConfig | None = None,
         index_config: IndexConfig | None = None,
+        *,
+        keep_normalized_lines: bool = True,
     ) -> NgramInvertedIndex:
         norm_config = norm_config or NormalizationConfig()
         sim_config = sim_config or SimilarityConfig()
         index_config = index_config or IndexConfig()
-        resolved_mode = _resolve_mode(index_config)
+        resolved_mode = resolve_mode(index_config)
         normalized_lines = [normalize_text(line, norm_config) for line in lines]
+        doc_count = len(normalized_lines)
 
         try:
             native_index = build_native_index(
                 normalized_lines=normalized_lines,
                 ngram_orders=sim_config.ngram_orders,
-                mode=_native_mode(resolved_mode),
+                mode=native_mode(resolved_mode),
                 candidate_gram_limit=index_config.candidate_gram_limit,
                 posting_limit=index_config.posting_limit,
                 max_candidates=index_config.max_candidates,
@@ -87,7 +82,7 @@ class NgramInvertedIndex:
             raise BackendError(f"{message}: {exc}") from exc
 
         return cls(
-            normalized_lines=normalized_lines,
+            normalized_lines=normalized_lines if keep_normalized_lines else [],
             norm_config=norm_config,
             sim_config=sim_config,
             index_config=index_config,
@@ -100,7 +95,7 @@ class NgramInvertedIndex:
                 resolved_mode=resolved_mode,
             ),
             native_index=native_index,
-            doc_count=len(normalized_lines),
+            doc_count=doc_count,
         )
 
     @classmethod
@@ -179,6 +174,88 @@ class NgramInvertedIndex:
             for row in native_rows
         ]
 
+    def best_above(self, text: str, threshold: float) -> NeighborResult | None:
+        return self.batch_best_above([text], threshold)[0]
+
+    def batch_best_above(
+        self,
+        texts: list[str],
+        threshold: float,
+    ) -> list[NeighborResult | None]:
+        normalized = [normalize_text(text, self.norm_config) for text in texts]
+        return self.batch_best_above_normalized(normalized, threshold)
+
+    def batch_best_above_normalized(
+        self,
+        normalized_texts: list[str],
+        threshold: float,
+    ) -> list[NeighborResult | None]:
+        threshold = validate_unit_threshold(threshold)
+        self._require_exact_threshold_backend()
+        tops = self.batch_query_topk_normalized(normalized_texts, 1)
+        results: list[NeighborResult | None] = []
+        for top in tops:
+            best = top[0] if top else zero_neighbor_if_threshold_zero(self.doc_count, threshold)
+            results.append(best if best is not None and best.score >= threshold else None)
+        return results
+
+    def batch_threshold_flags(
+        self,
+        texts: list[str],
+        thresholds: list[float] | tuple[float, ...],
+    ) -> list[dict[float, bool]]:
+        normalized = [normalize_text(text, self.norm_config) for text in texts]
+        return self.batch_threshold_flags_normalized(normalized, thresholds)
+
+    def batch_threshold_flags_normalized(
+        self,
+        normalized_texts: list[str],
+        thresholds: list[float] | tuple[float, ...],
+    ) -> list[dict[float, bool]]:
+        parsed_thresholds = validate_thresholds(thresholds)
+        self._require_exact_threshold_backend()
+        tops = self.batch_query_topk_normalized(normalized_texts, 1)
+        rows: list[dict[float, bool]] = []
+        for top in tops:
+            score = top[0].score if top else 0.0
+            rows.append({threshold: score >= threshold for threshold in parsed_thresholds})
+        return rows
+
+    def batch_source_bins_exact(
+        self,
+        texts: list[str],
+        *,
+        far_threshold: float,
+        near_threshold: float,
+    ) -> list[str]:
+        normalized = [normalize_text(text, self.norm_config) for text in texts]
+        return self.batch_source_bins_exact_normalized(
+            normalized,
+            far_threshold=far_threshold,
+            near_threshold=near_threshold,
+        )
+
+    def batch_source_bins_exact_normalized(
+        self,
+        normalized_texts: list[str],
+        *,
+        far_threshold: float,
+        near_threshold: float,
+    ) -> list[str]:
+        far_threshold = validate_unit_threshold(far_threshold)
+        near_threshold = validate_unit_threshold(near_threshold)
+        if far_threshold > near_threshold:
+            raise ConfigurationError("far_threshold must be no larger than near_threshold")
+        self._require_exact_threshold_backend()
+        tops = self.batch_query_topk_normalized(normalized_texts, 1)
+        bins: list[str] = []
+        for top in tops:
+            best = top[0] if top else None
+            score = best.score if best is not None else 0.0
+            exact = best.exact if best is not None else False
+            bins.append(source_bin_from_exact_score(exact, score, far_threshold, near_threshold))
+        return bins
+
     def score_candidate(self, text: str, index: int) -> float:
         if index < 0 or index >= self.doc_count:
             raise IndexError(f"candidate index out of range: {index}")
@@ -189,10 +266,69 @@ class NgramInvertedIndex:
         if not indices:
             return {}
         query_norm = normalize_text(text, self.norm_config)
+        return self.score_candidates_normalized(query_norm, indices)
+
+    def score_candidates_normalized(
+        self, normalized_text: str, indices: list[int]
+    ) -> dict[int, float]:
+        if not indices:
+            return {}
         return {
             int(index): float(score)
-            for index, score in self._native_index.score_candidates(query_norm, indices)
+            for index, score in self._native_index.score_candidates(normalized_text, indices)
         }
+
+    def pair_threshold_flags_exact(
+        self,
+        target_index: NgramInvertedIndex,
+        source_text: str,
+        ref_texts: list[str],
+        thresholds: list[float] | tuple[float, ...],
+    ) -> dict[str, bool]:
+        source_norm = normalize_text(source_text, self.norm_config)
+        target_norms = [normalize_text(ref, target_index.norm_config) for ref in ref_texts]
+        return self.pair_threshold_flags_exact_normalized(
+            target_index,
+            source_norm,
+            target_norms,
+            thresholds,
+        )
+
+    def pair_threshold_flags_exact_normalized(
+        self,
+        target_index: NgramInvertedIndex,
+        source_norm: str,
+        target_norms: list[str],
+        thresholds: list[float] | tuple[float, ...],
+    ) -> dict[str, bool]:
+        parsed_thresholds = validate_thresholds(thresholds)
+        self._require_exact_threshold_backend()
+        target_index._require_exact_threshold_backend()
+        if self.doc_count != target_index.doc_count:
+            raise BackendError("source and target indexes must have the same document count")
+        flags = {f"{threshold:.2f}": False for threshold in parsed_thresholds}
+        if not target_norms or self.doc_count == 0:
+            return flags
+
+        doc_indices = list(range(self.doc_count))
+        min_threshold = min(parsed_thresholds)
+        source_scores = self.score_candidates_normalized(source_norm, doc_indices)
+        source_candidates = [
+            index for index, score in source_scores.items() if score >= min_threshold
+        ]
+        if not source_candidates:
+            return flags
+
+        for target_norm in target_norms:
+            target_scores = target_index.score_candidates_normalized(target_norm, source_candidates)
+            for index in source_candidates:
+                pair_score = min(source_scores[index], target_scores.get(index, 0.0))
+                for threshold in parsed_thresholds:
+                    if pair_score >= threshold:
+                        flags[f"{threshold:.2f}"] = True
+            if all(flags.values()):
+                break
+        return flags
 
     def best_pair_candidate(
         self,
@@ -271,26 +407,9 @@ class NgramInvertedIndex:
             for item in self._native_index.query_topk(query_norm, k)
         ]
 
-
-def _resolve_mode(config: IndexConfig) -> str:
-    if config.mode == "auto":
-        if is_native_available():
-            return "native_exact"
-        status = native_status()
-        reason = f": {status.error}" if status.error else ""
-        raise BackendError(
-            "native Rust backend is required for TAME-MT retrieval but is unavailable"
-            f"{reason}. Install a wheel that matches this Python/platform, or rebuild the "
-            "editable install with `python -m pip install --force-reinstall --no-deps -e .`."
-        )
-    if config.mode in {"native_exact", "native_fast"}:
-        return config.mode
-    raise BackendError(f"unsupported native index mode: {config.mode}")
-
-
-def _native_mode(resolved_mode: str) -> str:
-    if resolved_mode == "native_exact":
-        return "exact"
-    if resolved_mode == "native_fast":
-        return "fast"
-    raise BackendError(f"unsupported native index mode: {resolved_mode}")
+    def _require_exact_threshold_backend(self) -> None:
+        if not self.backend_info.exact:
+            raise ApproximationError(
+                "exact threshold flags require native_exact; approximate native_fast "
+                "candidate search can miss neighbors above the threshold"
+            )

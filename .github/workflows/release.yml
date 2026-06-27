@@ -84,6 +84,26 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install twine
           python -m twine check dist/*
+      - name: Installed artifact benchmark smoke
+        run: |
+          wheel_path="$(python - <<'PY'
+          from pathlib import Path
+
+          candidates = sorted(
+              path
+              for path in Path("dist").glob("tame_mt-*-cp312-*.whl")
+              if "linux" in path.name and "x86_64" in path.name
+          )
+          if not candidates:
+              raise SystemExit("no compatible Linux CPython 3.12 wheel found in dist/")
+          print(candidates[0])
+          PY
+          )"
+          python -m pip install "$wheel_path"
+          python -m pip check
+          tame-mt doctor
+          python benchmarks/bench_synthetic.py --small --assert-thresholds
+          python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
       - name: Prepare SBOM output directory
         run: mkdir -p sbom
       - name: Generate SBOM

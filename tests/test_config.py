@@ -4,6 +4,7 @@ from tame_mt import (
     BinConfig,
     IndexConfig,
     NormalizationConfig,
+    PairConfig,
     RetrievalConfig,
     ScoreConfig,
     SimilarityConfig,
@@ -145,6 +146,8 @@ def test_score_config_rejects_wrong_nested_config_types() -> None:
         ScoreConfig(tm="bad")  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="metric"):
         ScoreConfig(metric="bad")  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="pair"):
+        ScoreConfig(pair="bad")  # type: ignore[arg-type]
 
 
 def test_score_config_defaults_to_exact_retrieval() -> None:
@@ -163,3 +166,11 @@ def test_score_config_rejects_accidental_approximate_backend() -> None:
 def test_score_config_approx_auto_selects_native_fast() -> None:
     config = ScoreConfig(retrieval=RetrievalConfig(mode="approx", allow_approximate=True))
     assert config.index.mode == "native_fast"
+
+
+def test_pair_exact_thresholds_require_exact_retrieval() -> None:
+    with pytest.raises(ConfigurationError, match="exact_thresholds require exact retrieval"):
+        ScoreConfig(
+            retrieval=RetrievalConfig(mode="approx", allow_approximate=True),
+            pair=PairConfig(exact_thresholds=True),
+        )

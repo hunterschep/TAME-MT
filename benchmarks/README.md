@@ -1,6 +1,8 @@
 # Benchmarks
 
 Benchmarks are smoke checks for regressions, not formal leaderboard claims.
+Committed summaries live under `benchmarks/results/`; they contain only timing
+metadata and generated-corpus shapes, never raw corpora.
 
 Run the synthetic benchmark:
 
@@ -17,7 +19,9 @@ python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
 Staged output reports index build time, `.tameidx` load time, indexed audit
 time, load-plus-audit total time, end-to-end cached scoring time, prepared
 cached scorer setup time, prepared cached hypothesis time, prepared batch
-per-system time, and bundle size.
+per-system time, bundle size, peak RSS, and the native Rayon thread count. Use
+`--threads N` when publishing large-run timings so the result is reproducible
+without relying on environment variables.
 
 Run the fast-retrieval recall guard:
 
@@ -37,9 +41,10 @@ python benchmarks/bench_synthetic.py \
   --train-size 100000 \
   --test-size 2000 \
   --staged \
-  --max-seconds 60 \
+  --max-seconds 15 \
   --max-index-build-seconds 8 \
-  --max-indexed-seconds 60 \
+  --max-indexed-seconds 10 \
+  --max-indexed-audit-seconds 5 \
   --max-cached-seconds 3 \
   --max-prepared-cached-seconds 1 \
   --max-cached-batch-per-system-seconds 1 \
@@ -71,6 +76,21 @@ CI runs a 50k train / 1k test staged benchmark outside the Python-version
 matrix plus a separate approximate throughput benchmark. The 100k exact and
 approximate local checks above remain the release-candidate gates in
 `scripts/acceptance.sh`.
+
+Run the current 1M / 2k stress smoke with an explicit thread count:
+
+```bash
+python benchmarks/bench_synthetic.py \
+  --train-size 1000000 \
+  --test-size 2000 \
+  --threads 8 \
+  --max-seconds 60 \
+  --assert-thresholds
+```
+
+This is intentionally reported as a stress smoke, not a universal claim. On the
+current release-candidate machine it passes the 60s wall-clock target and peaks
+under the 4 GiB RSS target with `--threads 8`.
 
 For public-corpus timing, use:
 

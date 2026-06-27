@@ -1,6 +1,6 @@
 [package]
 name = "tame-mt-native"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Native nearest-neighbor backend for TAME-MT"
@@ -23,6 +23,7 @@ name = "tame_mt_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+blake3 = "1.8"
 pyo3 = "0.29.0"
 rayon = "1.10"
 rmp-serde = "1.3"

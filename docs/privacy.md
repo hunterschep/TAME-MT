@@ -10,28 +10,30 @@ The privacy risk is in artifacts you choose to write.
 Treat these as sensitive:
 
 - `.tameidx` index bundles;
-- segment JSONL files that include TM hypotheses;
-- segment JSONL files written with raw text flags;
+- `.tamecache` files, because they include TM hypotheses;
+- diagnostic/cache JSONL files written with raw text flags;
 - segment metadata sidecars, because they reveal corpus fingerprints and
   experiment provenance.
 
 `.tameidx` bundles store raw training source text and, when available, raw
-training target text. They also store normalized exact-match and pair keys so
-the bundle can reproduce exposure diagnostics without rebuilding from raw
-files.
+training target text. They also store fixed-size exact-match and pair
+fingerprints so the bundle can reproduce exposure diagnostics without rebuilding
+from raw files.
 
-Segment JSONL includes TM baseline hypotheses by default. A TM hypothesis is
-usually copied from the nearest training target segment, so it may contain raw
+Cache artifacts include TM baseline hypotheses. A TM hypothesis is usually
+copied from the nearest training target segment, so it may contain raw
 training-target text even when `--include-neighbor-text` is not used.
 
 Use this option for privacy-safer diagnostics:
 
 ```bash
---no-tm-text-in-segments
+--diagnostic-out segments.diagnostic.jsonl
 ```
 
-Those artifacts intentionally cannot be used by `score-cached`, because cached
-scoring needs the TM hypotheses to recompute TM-BLEU and delta-over-TM.
+Diagnostic artifacts omit TM hypotheses by default and intentionally cannot be
+used by `score-cached`. Cached scoring needs TM hypotheses to recompute TM-BLEU
+and delta-over-TM, so use `--cache-out` only when that artifact can be protected
+like training-target text.
 
 ## Raw Text Flags
 

@@ -53,8 +53,10 @@ def main() -> int:
                 str(gz_inputs["hyp.out"]),
                 "--json-out",
                 str(tmp / "fresh.json.gz"),
-                "--segment-out",
-                str(tmp / "segments.jsonl.gz"),
+                "--diagnostic-out",
+                str(tmp / "segments.diagnostic.jsonl.gz"),
+                "--cache-out",
+                str(tmp / "segments.tamecache.gz"),
                 "--tm-out",
                 str(tmp / "tm.out.gz"),
                 "--quiet",
@@ -112,14 +114,12 @@ def main() -> int:
         _run(
             [
                 "score-cached",
-                "--segment-in",
-                str(tmp / "segments.jsonl.gz"),
+                "--cache-in",
+                str(tmp / "segments.tamecache.gz"),
                 "--ref",
                 str(gz_inputs["test.ref"]),
                 "--hyp",
                 str(gz_inputs["hyp.out"]),
-                "--num-train",
-                "4",
                 "--json-out",
                 str(tmp / "cached.json.gz"),
                 "--quiet",
@@ -128,16 +128,14 @@ def main() -> int:
         _run(
             [
                 "score-cached-batch",
-                "--segment-in",
-                str(tmp / "segments.jsonl.gz"),
+                "--cache-in",
+                str(tmp / "segments.tamecache.gz"),
                 "--ref",
                 str(gz_inputs["test.ref"]),
                 "--system",
                 f"baseline={gz_inputs['hyp.out']}",
                 "--system",
                 f"variant={variant_hyp}",
-                "--num-train",
-                "4",
                 "--json-out-dir",
                 str(tmp / "batch_reports"),
                 "--quiet",
@@ -164,8 +162,8 @@ def main() -> int:
         cached = _read_json(tmp / "cached.json.gz")
         batch_baseline = _read_json(tmp / "batch_reports" / "baseline.json")
         batch_variant = _read_json(tmp / "batch_reports" / "variant.json")
-        exposures, tm_results = read_segment_jsonl(tmp / "segments.jsonl.gz")
-        metadata = read_segment_metadata(tmp / "segments.jsonl.gz")
+        exposures, tm_results = read_segment_jsonl(tmp / "segments.tamecache.gz")
+        metadata = read_segment_metadata(tmp / "segments.tamecache.gz")
         if metadata is None:
             raise SystemExit("segment metadata sidecar was not written")
         validate_segment_metadata(

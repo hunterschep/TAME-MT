@@ -10,6 +10,8 @@ TAME-MT report.
 - delta over TM for BLEU and chrF
 - SourceExposure
 - PairLeakTopK at configured thresholds
+- PairLeakExact at configured thresholds, when exact pair-threshold computation
+  is requested
 - Far-BLEU and Far-chrF
 - GenGap-BLEU and GenGap-chrF
 

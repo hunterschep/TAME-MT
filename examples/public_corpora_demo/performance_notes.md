@@ -1,19 +1,21 @@
 # OPUS-100 Demo Performance Notes
 
-This demo originally exposed an important issue: exact train-test nearest
-neighbor search is much slower than BLEU because it has to inspect training
-data. TAME-MT now uses a production-oriented two-stage path.
+This demo originally exposed an important issue: train-test nearest-neighbor
+search is more expensive than BLEU because it has to inspect training data.
+TAME-MT now uses native exact retrieval by default for paper-facing demo
+summaries and reserves approximate retrieval for explicitly labeled exploratory
+runs.
 
 ## Retrieval Modes
 
-- `native_exact`: Rust exact character n-gram Jaccard retrieval. Best for small
-  corpora or targeted verification when exact exposure is required.
+- `native_exact`: Rust exact character n-gram Jaccard retrieval. This is the
+  default for release demo summaries and paper-facing numbers.
 - `native_fast`: Rust rare-gram candidate generation plus exact Jaccard
-  reranking of a bounded shortlist. Best for large audits.
-- `python_exact` / `python_fast`: pure-Python fallbacks for debugging and
-  source installs without the native extension.
-- `auto`: native exact/fast when the extension is installed, otherwise Python
-  exact/fast fallback. This is the default.
+  reranking of a bounded shortlist. Use only with `--retrieval approx`,
+  `--allow-approximate`, and validation for paper-critical work.
+- `auto`: resolves to the safest configured backend for the selected retrieval
+  mode. With the native extension installed, exact demo runs resolve to
+  `native_exact`.
 
 ## Cached Scoring Workflow
 
@@ -25,7 +27,7 @@ tame-mt index build \
   --train-tgt train.tgt \
   --out train.tameidx
 
-tame-mt audit \
+tame-mt score \
   --index train.tameidx \
   --test-src test.src \
   --ref test.ref \
@@ -36,7 +38,7 @@ For repeated system comparisons on the same train/test/reference setup, compute
 train-aware diagnostics once:
 
 ```bash
-tame-mt audit \
+tame-mt score \
   --train-src train.src \
   --train-tgt train.tgt \
   --test-src test.src \
@@ -63,14 +65,12 @@ pairs and 2,000 test pairs:
 
 | Step | Backend | Time |
 | --- | --- | ---: |
-| `run_opus100_demo.py --pair de-en --train-limit 50000 --test-limit 2000` after download cache | `native_fast` | ~5.7s |
-| `tame-mt audit --segment-out` on prepared files | `native_fast` | ~6.4s |
-| `tame-mt score-cached` for one hypothesis | cached diagnostics | ~1.8s |
-| Four-pair OPUS-100 standard demo after download cache | `native_fast` | ~21.4s |
-| OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
-| OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
-| OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.5s |
+| `tame-mt demo opus100 --standard --pair de-en --retrieval exact` after download cache | `native_exact` | ~3.2s |
+| Four-pair OPUS-100 standard demo after download cache | `native_exact` | ~9.9s |
+| `tame-mt demo opus100 --quick --retrieval exact` after download cache | `native_exact` | ~0.6s |
+| Synthetic 100k train / 2k test, fresh audit | `native_exact` | ~4.1s |
+| Synthetic 100k train / 2k test, audit from `.tameidx` | `native_exact`, reused index | ~2.1s |
+| Synthetic 100k train / 2k test, prepared cached score | cached diagnostics | ~0.2s |
 
 The index-build step is the reusable training-corpus cost. The audit step is
 the train/test/reference diagnostic cost. The cached-score step is the

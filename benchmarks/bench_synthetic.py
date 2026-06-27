@@ -8,6 +8,11 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+try:
+    import resource
+except ImportError:  # pragma: no cover - Windows
+    resource = None
+
 from tame_mt import (
     IndexConfig,
     RetrievalConfig,
@@ -18,7 +23,7 @@ from tame_mt import (
 )
 from tame_mt.exceptions import TameMTError
 from tame_mt.json_utils import strict_json_dumps
-from tame_mt.native import native_status
+from tame_mt.native import configure_native_threads, native_status, native_thread_count
 
 
 def main() -> int:
@@ -32,6 +37,11 @@ def main() -> int:
     parser.add_argument("--index-mode", default="auto")
     parser.add_argument("--retrieval", choices=["exact", "guarded", "approx"], default="exact")
     parser.add_argument(
+        "--threads",
+        default="auto",
+        help="Rayon worker threads for native retrieval; use 'auto' or a positive integer",
+    )
+    parser.add_argument(
         "--allow-approximate",
         action="store_true",
         help="allow approximate retrieval for native_fast benchmark runs",
@@ -44,6 +54,12 @@ def main() -> int:
         type=float,
         default=None,
         help="staged mode threshold for .tameidx load plus indexed audit time",
+    )
+    parser.add_argument(
+        "--max-indexed-audit-seconds",
+        type=float,
+        default=None,
+        help="staged mode threshold for indexed audit time after .tameidx load",
     )
     parser.add_argument("--max-cached-seconds", type=float, default=None)
     parser.add_argument("--max-prepared-cached-seconds", type=float, default=None)
@@ -64,6 +80,7 @@ def main() -> int:
     if max_seconds is None:
         max_seconds = 8.0 if args.small else 60.0
 
+    configure_threads(args.threads)
     train_src, train_tgt, test_src, refs = make_corpus(train_size, test_size)
     config = ScoreConfig(
         index=IndexConfig(mode=args.index_mode),
@@ -84,6 +101,8 @@ def main() -> int:
         "seconds": elapsed,
         "backend": report.backend,
         "signature": report.signature,
+        "peak_rss_mb": peak_rss_mb(),
+        "threads": native_thread_count(),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "native": asdict(native_status()),
@@ -111,12 +130,29 @@ def main() -> int:
             small=args.small,
             max_index_build_seconds=args.max_index_build_seconds,
             max_indexed_seconds=args.max_indexed_seconds,
+            max_indexed_audit_seconds=args.max_indexed_audit_seconds,
             max_cached_seconds=args.max_cached_seconds,
             max_prepared_cached_seconds=args.max_prepared_cached_seconds,
             max_cached_batch_per_system_seconds=args.max_cached_batch_per_system_seconds,
             max_index_bytes=args.max_index_bytes,
         )
     return 0
+
+
+def configure_threads(value: str | int | None) -> None:
+    if value in (None, "auto"):
+        configure_native_threads(None)
+        return
+    try:
+        threads = int(value)
+    except ValueError as exc:
+        raise SystemExit("--threads must be 'auto' or a positive integer") from exc
+    if threads <= 0:
+        raise SystemExit("--threads must be 'auto' or a positive integer")
+    try:
+        configure_native_threads(threads)
+    except Exception as exc:
+        raise SystemExit(f"failed to configure native threads: {exc}") from exc
 
 
 def run_staged_benchmark(
@@ -211,6 +247,7 @@ def assert_stage_thresholds(
     small: bool,
     max_index_build_seconds: float | None,
     max_indexed_seconds: float | None,
+    max_indexed_audit_seconds: float | None,
     max_cached_seconds: float | None,
     max_prepared_cached_seconds: float | None,
     max_cached_batch_per_system_seconds: float | None,
@@ -226,6 +263,11 @@ def assert_stage_thresholds(
         ),
         "indexed_total_seconds": (
             max_indexed_seconds if max_indexed_seconds is not None else (4.0 if small else 15.0)
+        ),
+        "indexed_audit_seconds": (
+            max_indexed_audit_seconds
+            if max_indexed_audit_seconds is not None
+            else (4.0 if small else 5.0)
         ),
         "cached_score_seconds": (
             max_cached_seconds if max_cached_seconds is not None else (3.0 if small else 10.0)
@@ -295,6 +337,21 @@ def make_system_outputs(refs: list[str], count: int) -> dict[str, list[str]]:
             for segment_idx, ref in enumerate(refs)
         ]
     return systems
+
+
+def peak_rss_mb() -> float | None:
+    if resource is None:
+        return None
+    try:
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except OSError:
+        return None
+    if rss <= 0:
+        return None
+    # Linux reports KiB; macOS reports bytes.
+    if platform.system() == "Darwin":
+        return rss / (1024 * 1024)
+    return rss / 1024
 
 
 if __name__ == "__main__":

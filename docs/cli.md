@@ -15,7 +15,8 @@ Outputs a human-readable report to stdout. Optional outputs:
 
 ```bash
 --json-out report.json
---segment-out segments.jsonl
+--diagnostic-out segments.diagnostic.jsonl
+--cache-out segments.tamecache
 --tm-out tm.out
 ```
 
@@ -90,7 +91,7 @@ load-memory budget, member SHA-256 hashes, optional supplied training-file
 hashes, and native-index invariants. Use `--json` for a machine-readable
 summary.
 
-Index bundles store raw training text and normalized exact-match and pair keys.
+Index bundles store raw training text plus exact-match and pair fingerprints.
 Protect them with the same access controls as the original training corpus.
 Index bundle writes are atomic: the output path is replaced only after the new
 ZIP bundle is fully written and closed. Bundle loading rejects unexpected ZIP
@@ -100,6 +101,9 @@ deserialization. Native bytes are also invariant-checked before queries can run.
 If `score --index` or `audit --index` reports an unsupported bundle or native
 schema version after an upgrade, rebuild the `.tameidx` file with the current
 `tame-mt index build` command.
+Exact index bundles may be reused with different query-time settings such as
+`--pair-k` and `--batch-size`. They are not reusable across normalization,
+ngram/similarity, backend-mode, or fast-mode cap changes.
 
 For trusted large bundles on high-memory machines, raise the load budget:
 
@@ -107,7 +111,7 @@ For trusted large bundles on high-memory machines, raise the load budget:
 --max-index-load-bytes 8589934592
 ```
 
-For large corpora or repeated system comparisons, cache segment diagnostics once:
+For large corpora or repeated system comparisons, cache train-aware diagnostics once:
 
 ```bash
 tame-mt audit \
@@ -115,7 +119,7 @@ tame-mt audit \
   --train-tgt train.tgt \
   --test-src test.src \
   --ref test.ref \
-  --segment-out segments.jsonl \
+  --cache-out segments.tamecache \
   --json-out audit.json
 ```
 
@@ -123,10 +127,9 @@ Then score each system without rebuilding the training index:
 
 ```bash
 tame-mt score-cached \
-  --segment-in segments.jsonl \
+  --cache-in segments.tamecache \
   --ref test.ref \
   --hyp system.out \
-  --num-train 125000 \
   --json-out system.tame.json
 ```
 
@@ -135,11 +138,10 @@ and TM baseline scores are reused:
 
 ```bash
 tame-mt score-cached-batch \
-  --segment-in segments.jsonl \
+  --cache-in segments.tamecache \
   --ref test.ref \
   --system system_a=system_a.out \
   --system system_b=system_b.out \
-  --num-train 125000 \
   --json-out-dir tame_reports
 ```
 
@@ -147,8 +149,8 @@ Cached segment rows include the source-exposure bin assigned during the original
 audit. `score-cached` and `score-cached-batch` verify those labels against the
 current `--far-threshold` and `--near-threshold`; if the thresholds differ,
 TAME-MT fails instead of producing a mixed-configuration report.
-New segment outputs also include an automatic `segments.jsonl.meta.json`
-sidecar. Cached commands require and validate that sidecar, including
+New diagnostic/cache outputs also include an automatic `.meta.json` sidecar.
+Cached commands require and validate that sidecar, including
 normalization, similarity, retrieval settings, TM zero policy, train/test/ref
 counts, bin thresholds, reference content hashes, and TM hypothesis hashes.
 Older segment JSONL files without a sidecar fail by default; pass
@@ -157,14 +159,15 @@ When a sidecar is present, cached JSON reports copy the original producing
 backend into `backend.artifact_backend`.
 
 `score-cached` reuses source/target/pair exposure and TM hypotheses from the
-segment JSONL file. It recomputes only system metrics, TM metrics, delta over
-TM, bin scores, warnings, and the final report.
+cache artifact. It recomputes only system metrics, TM metrics, delta over TM,
+bin scores, warnings, and the final report.
 `score-cached-batch` does the same work for multiple systems while reading and
 validating the segment JSONL once and computing the TM baseline once.
 
-Segment JSONL contains TM hypotheses by default and may contain raw
-training-target text. Use `--no-tm-text-in-segments` for privacy-safer
-diagnostics that cannot be used by `score-cached`.
+`--cache-out` contains TM hypotheses and may contain raw training-target text.
+`--diagnostic-out` omits TM hypotheses by default for privacy-safer diagnostics.
+Pass `--include-tm-text` only when a diagnostic artifact may safely store TM
+hypotheses. `--segment-out` remains a deprecated alias for `--cache-out`.
 
 Segment rows are validated before scoring. Indices must be unique and
 contiguous from `0` to `N-1`; valid rows may appear in any order and are sorted
@@ -255,10 +258,21 @@ version, Rayon thread count when native is available, and whether the native
 Rust backend is importable. Use it first when a large run seems unexpectedly
 slow.
 
+To force a native thread count for a run:
+
+```bash
+tame-mt score --threads 4 ...
+```
+
+`--threads auto` uses Rayon defaults. Numeric thread counts must be positive
+and must be set before native retrieval starts; the CLI configures this before
+loading or building native indexes.
+
 ## Segment Text Options
 
-By default, segment JSONL contains indices, scores, bins, and TM hypotheses,
-but not raw source/reference/hypothesis/neighbor text.
+By default, diagnostic JSONL contains indices, scores, and bins, but not raw
+source/reference/hypothesis/neighbor text or TM hypotheses. Cache artifacts
+include TM hypotheses because cached scoring requires them.
 
 ```bash
 --include-source-text
@@ -315,6 +329,15 @@ approximate shortlist, and reranks that shortlist with exact Jaccard similarity.
 Reports label this as approximate retrieval and show `PairLeakTopK` for pair
 thresholds.
 
+For exact no-false-negative pair threshold rates, use exact retrieval with:
+
+```bash
+--exact-pair-thresholds
+```
+
+This adds `PairLeakExact@t` values under `exposure.pair.exact_at_threshold`.
+It can be substantially slower than top-k pair reranking on large corpora.
+
 For large approximate runs, use `--validate-approx-sample N` as a per-corpus
 guardrail. The validation sample compares source nearest-neighbor identity,
 source-bin agreement, source-score error, target nearest-neighbor identity,
@@ -326,3 +349,8 @@ written with the failure recorded as a warning.
 `auto`, `native_exact`, and `native_fast` are the only accepted index modes.
 There are no Python retrieval backends; if the Rust extension is unavailable,
 TAME-MT reports an installation error.
+
+Native retrieval uses Rayon. Use `--threads N` on `score`, `audit`,
+`tm-baseline`, `index build`, and cached scoring commands when you need a fixed
+thread count for reproducible benchmarking or resource limits. Reports include
+the actual native thread count under `performance.threads`.

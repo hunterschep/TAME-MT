@@ -31,6 +31,12 @@ tame-mt score \
 keeps a bounded candidate set, and reranks that shortlist with exact Jaccard
 similarity. It can miss a true nearest neighbor outside the candidate set.
 
+`native_exact` also exposes exact threshold helpers for integrations that only
+need no-false-negative decisions at configured cutoffs:
+`batch_best_above`, `batch_threshold_flags`, and `batch_source_bins_exact`.
+These helpers refuse `native_fast`; exact threshold flags are never inferred
+from approximate candidate search.
+
 Approximate reports include:
 
 - `retrieval.mode = "approx"`
@@ -73,8 +79,14 @@ case the JSON report records the failure under `approx_validation` and in
 Exact pair overlap is exact. Pair threshold rates are top-k candidate limited in
 the current implementation, so they are labeled `PairLeakTopK@t`.
 
+When `--exact-pair-thresholds` is enabled in exact retrieval mode, reports also
+include `PairLeakExact@t` values under `exposure.pair.exact_at_threshold`.
+These are no-false-negative threshold flags and are reported separately from
+the top-k pair exposure score.
+
 Do not write `PairLeak@0.85` unless the run used an exact or no-false-negative
-pair threshold search for that threshold.
+pair threshold search for that threshold. Prefer the explicit names
+`PairLeakTopK@0.85` or `PairLeakExact@0.85`.
 
 ## Recommended Use
 

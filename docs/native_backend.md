@@ -61,29 +61,46 @@ and returns deterministically sorted nearest-neighbor results. Exact-match maps
 store normalized strings, so exact source/target overlap is literal after
 normalization. Ties are resolved by lower training index.
 
+The Python `tame_mt.index` package is split into retrieval protocols, mode
+helpers, a native Rust wrapper, and a small `PythonExactSimilarityIndex`
+reference implementation. The reference implementation is for parity tests and
+debugging; CLI and public scoring paths use the native backend and fail safely
+when it is unavailable.
+
 `native_exact` preserves exact nearest-neighbor retrieval over candidates that
-share query n-grams. It is the paper-facing default. `native_fast` is approximate
-because it bounds rare-gram candidate generation before exact Jaccard reranking.
-It requires explicit approximate retrieval configuration. The report signature
-records retrieval mode, approximation flag, and resolved backend.
+share query n-grams. It is the paper-facing default. Exact batch queries reuse a
+per-worker vector workspace for candidate counts and touched document IDs, so
+large audits do not allocate a new candidate map for every test segment. Exact
+queries process matching grams by increasing posting-list length and apply the
+Jaccard length upper bound when the current top-k frontier can no longer be
+beaten.
+
+`native_fast` is approximate because it bounds rare-gram candidate generation
+before exact Jaccard reranking. It requires explicit approximate retrieval
+configuration. The native extension exposes separate exact and fast top-k entry
+points internally, and the report signature records retrieval mode,
+approximation flag, and resolved backend.
 
 Corpus-level batch queries and batched pair reranking release the Python GIL and
 use Rayon for parallel execution inside Rust. Python still owns file IO,
 SacreBLEU scoring, JSON serialization, and report formatting.
+Use CLI `--threads N` to configure Rayon before native indexes are loaded or
+built. `--threads auto` leaves Rayon defaults in place. Reports and `doctor`
+show the active thread count so benchmark runs can be reproduced.
 
 During fresh native audits, Python keeps normalized training strings only long
-enough to build exact source/target pair keys. It then releases those Python
-copies; the Rust indexes retain the compact grams, postings, and exact maps
-needed for retrieval. Loaded `.tameidx` bundles follow the same low-memory shape
-and do not materialize Python normalized training-line copies.
+enough to build exact source/target pair fingerprints. It then releases those
+Python copies; the Rust indexes retain the compact grams, postings, and exact
+fingerprint maps needed for retrieval. Loaded `.tameidx` bundles follow the
+same low-memory shape and do not materialize Python normalized training-line
+copies.
 
 Pair exposure uses native pair reranking when both source and target indexes are
 native. Python builds deterministic candidate ID lists from source and target
 top-k results, then Rust scores each source/reference query against the shared
 candidate set and returns the best paired neighbor. The corpus path batches
 those pair reranks through one native call, which reduces Python/Rust boundary
-overhead at large test sizes. There is no Python retrieval backend in the
-production package.
+overhead at large test sizes.
 
 ## Persistent Indexes
 
@@ -124,15 +141,15 @@ n-gram IDs, posting/document cross-references, exact-map indices, sortedness,
 uniqueness, modes, and retrieval limits before the index can answer queries.
 
 Bundle manifests include SHA-256 hashes for raw training text, normalized
-training text, native index payloads, and exact-pair keys when present. Use
+training text, native index payloads, and exact-pair fingerprints when present. Use
 `tame-mt index verify train.tameidx` to check those hashes and native invariants
 without running a score/audit command. Add `--train-src` and `--train-tgt` to
 verify that a bundle still matches local training files.
 
 Bundles are low-compression zip containers by default. Level-1 deflate keeps
 load time low while avoiding very large cache artifacts on public-corpus-scale
-training sets. Because bundles contain raw training text and normalized
-exact-match and pair keys, they should be handled as training data.
+training sets. Because bundles contain raw training text plus exact-match and
+pair fingerprints, they should be handled as training data.
 
 Bundle writes are atomic at the file level: `tame-mt index build` writes a
 temporary file in the destination directory and replaces the requested output

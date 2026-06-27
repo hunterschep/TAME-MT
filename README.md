@@ -88,6 +88,7 @@ analysis. It is a training-aware layer around corpus evaluation.
 | `TargetExposure` | For each reference, similarity to the closest training target. |
 | `PairExposure` | Whether a test source/reference pair is close to the same training source/target pair. |
 | `PairLeakTopK@0.85` | Fraction of test pairs whose top-k pair-reranked exposure is at least `0.85`. |
+| `PairLeakExact@0.85` | Optional exact no-false-negative pair-threshold rate when `--exact-pair-thresholds` is used. |
 | `source_exact` | Test source exactly appears in normalized training sources. |
 | `pair_exact` | Test source and reference exactly appear as a normalized training pair. |
 | `Far-BLEU`, `Far-chrF` | Quality on test examples far from the training source corpus. |
@@ -201,12 +202,14 @@ tame-mt score \
   --ref test.ref \
   --hyp system.out \
   --json-out report.json \
-  --segment-out segments.jsonl \
+  --diagnostic-out segments.diagnostic.jsonl \
+  --cache-out segments.tamecache \
   --tm-out tm.out
 ```
 
 The JSON report is for dashboards and reproducible experiment records. The
-segment JSONL file is for per-example analysis and cached scoring.
+diagnostic JSONL file is for per-example analysis. The `.tamecache` artifact
+contains the TM hypotheses needed by `score-cached`.
 
 ## Large Corpora
 
@@ -251,7 +254,7 @@ tame-mt audit \
   --index train.tameidx \
   --test-src test.src \
   --ref test.ref \
-  --segment-out segments.jsonl \
+  --cache-out segments.tamecache \
   --json-out audit.json
 ```
 
@@ -259,10 +262,9 @@ Then score one hypothesis without another training-corpus pass:
 
 ```bash
 tame-mt score-cached \
-  --segment-in segments.jsonl \
+  --cache-in segments.tamecache \
   --ref test.ref \
   --hyp system_a.out \
-  --num-train 125000 \
   --json-out system_a.tame.json
 ```
 
@@ -270,12 +272,11 @@ Or score many systems in one batch:
 
 ```bash
 tame-mt score-cached-batch \
-  --segment-in segments.jsonl \
+  --cache-in segments.tamecache \
   --ref test.ref \
   --system baseline=baseline.out \
   --system model_a=model_a.out \
   --system model_b=model_b.out \
-  --num-train 125000 \
   --json-out-dir tame_reports
 ```
 
@@ -429,6 +430,12 @@ For example, `PairLeakTopK@0.85 = 0.20` means 20% of test examples have a
 source/reference pair that is very close to one training pair within the
 top-k candidate set. Exact pair overlap is exact; top-k pair leak is labeled
 separately because it is candidate-set limited.
+
+When `--exact-pair-thresholds` is enabled, TAME-MT also reports
+`PairLeakExact@t`. That value checks whether any same-index training pair has
+both source similarity and target similarity at least `t`. It has no false
+negatives for the configured threshold, but it can be much slower than top-k
+pair reranking on large corpora.
 
 ### Translation-Memory Baseline
 
@@ -611,11 +618,16 @@ result = scorer.evaluate_index_bundle(
 Prepare cached diagnostics once and score many systems:
 
 ```python
-cached = scorer.prepare_from_artifacts(
-    exposures=segments,
-    tm_results=result.tm_results,
+from tame_mt import load_cached_artifact
+
+artifact = load_cached_artifact(
+    "segments.tamecache",
     refs=[ref_lines],
-    num_train=len(train_src_lines),
+    config=scorer.config,
+)
+cached = scorer.prepare_from_cached_artifact(
+    artifact,
+    refs=[ref_lines],
 )
 
 reports = cached.score_many(
@@ -635,9 +647,9 @@ For deeper API documentation, see [docs/api.md](docs/api.md).
 
 ```json
 {
-  "schema_version": "0.1",
-  "tame_version": "0.1.0",
-  "signature": "tame-mt|v:0.1.0|...",
+  "schema_version": "1.0",
+  "tame_version": "0.2.0",
+  "signature": "tame-mt|v:0.2.0|...",
   "data": {
     "num_train": 125000,
     "num_test": 1000,
@@ -682,14 +694,14 @@ Every report includes a deterministic signature that records:
 - retrieval mode, approximation flag, backend, and index mode;
 - TM baseline policy;
 - bin and leak thresholds;
-- pair reranking top-k;
+- pair reranking top-k and whether exact pair thresholds were computed;
 - BLEU/chrF settings;
 - metric-affecting dependency versions.
 
 Example:
 
 ```text
-tame-mt|v:0.1.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|retrieval:exact|approx:0|idx:auto|backend:native_exact|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
+tame-mt|v:0.2.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|retrieval:exact|approx:0|idx:auto|backend:native_exact|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|pair_exact:0|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
 ```
 
 For the JSON schema, see [docs/json_schema.md](docs/json_schema.md).
@@ -707,7 +719,7 @@ src/tame_mt/
   normalize.py    deterministic text normalization
   ngrams.py       character n-gram extraction
   similarity.py   Jaccard similarity logic
-  index.py        thin wrapper around the Rust native index
+  index/          retrieval interfaces, native wrapper, and exact reference index
   native.py       native backend selection/status
   exact.py        exact overlap and exact-match helpers
   exposure.py     source, target, and pair exposure assembly
@@ -723,21 +735,39 @@ src/tame_mt/
   io.py           UTF-8 and gzip input/output helpers
 ```
 
-The Rust/PyO3 native extension is the only production retrieval engine. Python
-owns packaging, the public API, CLI argument parsing, file IO, normalization,
-SacreBLEU integration, aggregation, and report rendering. Rust owns
-high-throughput nearest-neighbor search, exact reranking, pair reranking, and
-serialized native indexes. If the Rust extension is unavailable, normal scoring
-fails with an installation error instead of falling back to a slower Python
-engine.
+The retrieval package is intentionally split:
+
+```text
+src/tame_mt/index/
+  __init__.py     stable import surface for retrieval types
+  base.py         retrieval protocols and result/backend dataclasses
+  modes.py        backend mode and threshold validation helpers
+  native.py       Rust-backed production index wrapper
+  python_exact.py exact Python reference index for parity/debugging
+  factory.py      construction helper for internal callers
+```
+
+The Rust/PyO3 native extension is the production retrieval engine. Python owns
+packaging, the public API, CLI argument parsing, file IO, normalization,
+SacreBLEU integration, aggregation, and report rendering. The internal
+`tame_mt.index` package separates retrieval protocols, mode resolution, the
+native wrapper, and a small Python exact reference index used for parity tests
+and debugging. Rust owns high-throughput nearest-neighbor search, exact
+reranking, pair reranking, and serialized native indexes. If the Rust extension
+is unavailable, normal scoring fails with an installation error instead of
+falling back silently.
 
 Rust crate layout:
 
 ```text
 src/lib.rs              PyO3 module registration
 src/index/mod.rs        native index construction and Python-exposed methods
-src/index/query.rs      nearest-neighbor and pair-reranking logic
+src/index/query.rs      top-k query orchestration and exact/fast dispatch
+src/index/exact.rs      exact nearest-neighbor ranking with reusable workspaces
+src/index/fast.rs       approximate rare-gram candidate collection and rerank
+src/index/pair.rs       pair-candidate reranking
 src/index/validation.rs serialized-index invariant checks
+src/index/workspace.rs  reusable per-query native work buffers
 src/index/tests.rs      Rust native-index tests
 src/ngrams.rs           UTF-8-safe character n-gram slicing
 src/similarity.rs       integer Jaccard helpers
@@ -797,7 +827,7 @@ for published numbers.
 Recommended production workflow:
 
 1. Build `train.tameidx` once for a fixed training corpus.
-2. Run `audit --index train.tameidx --segment-out segments.jsonl` once for a
+2. Run `audit --index train.tameidx --cache-out segments.tamecache` once for a
    fixed test/reference setup.
 3. Run `score-cached-batch` for all systems.
 
@@ -810,6 +840,10 @@ index-reuse status, peak RSS, and available stage timings. Use
 `--profile-json profile.json` on CLI runs to write a separate command profile
 that includes final output-writing time.
 
+Native retrieval uses Rayon. Pass `--threads N` to fix the worker count for a
+CLI run; `--threads auto` keeps Rayon defaults. Report JSON records the actual
+thread count in `performance.threads`.
+
 ## Privacy And Security
 
 TAME-MT runs locally. It does not download models, call remote services, or send
@@ -819,21 +853,23 @@ Data can still leak through artifacts you choose to write:
 
 - `--include-neighbor-text` can write raw training text;
 - `.tameidx` bundles contain training text needed for reproducible TM outputs;
-- segment JSONL contains TM baseline hypotheses by default and may therefore
-  contain raw training-target text;
-- segment JSONL files may contain raw test/reference/hypothesis text if raw
-  text flags are enabled.
+- `.tamecache` files contain TM baseline hypotheses and may therefore contain
+  raw training-target text;
+- diagnostic/cache JSONL files may contain raw test/reference/hypothesis text
+  if raw text flags are enabled.
 
-Use `--no-tm-text-in-segments` for privacy-safer diagnostics that omit TM
-hypotheses. Those diagnostics are intentionally not accepted by `score-cached`,
-because cached scoring needs the TM hypotheses to recompute TM-BLEU and delta
+Use `--diagnostic-out` for privacy-safer diagnostics that omit TM hypotheses by
+default. Use `--include-tm-text` only when that diagnostic artifact may safely
+store TM hypotheses. Cached scoring uses `--cache-out`, which intentionally
+includes TM hypotheses because they are required to recompute TM-BLEU and delta
 over TM.
 
-Treat `.tameidx`, segment JSONL, and metadata files from unknown sources as
-untrusted. The loader rejects malformed or suspicious index bundles before
-native deserialization, including unexpected ZIP members, duplicate names,
-unsafe declared sizes, excessive compression ratios, load-memory budget
-violations, unsupported schema versions, and invalid native-index invariants.
+Treat `.tameidx`, `.tamecache`, diagnostic JSONL, and metadata files from
+unknown sources as untrusted. The loader rejects malformed or suspicious index
+bundles before native deserialization, including unexpected ZIP members,
+duplicate names, unsafe declared sizes, excessive compression ratios,
+load-memory budget violations, unsupported schema versions, and invalid
+native-index invariants.
 
 For more detail, see [SECURITY.md](SECURITY.md).
 
@@ -920,7 +956,7 @@ See [docs/release.md](docs/release.md).
 @software{tame_mt_2026,
   title = {TAME-MT: Training-Aware Machine Translation Evaluation},
   year = {2026},
-  version = {0.1.0},
+  version = {0.2.0},
   url = {https://github.com/hunterschep/TAME-MT}
 }
 ```

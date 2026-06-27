@@ -16,15 +16,14 @@ from tame_mt.api import EvaluationResult, TameScorer
 from tame_mt.approx_validation import validate_approximate_run
 from tame_mt.artifacts import (
     build_segment_fingerprints,
-    read_segment_jsonl,
-    read_segment_metadata,
-    validate_segment_metadata,
+    load_cached_artifact,
 )
 from tame_mt.config import (
     BinConfig,
     IndexConfig,
     MetricConfig,
     NormalizationConfig,
+    PairConfig,
     RetrievalConfig,
     ScoreConfig,
     SimilarityConfig,
@@ -32,10 +31,11 @@ from tame_mt.config import (
     parse_float_tuple,
     parse_int_tuple,
 )
+from tame_mt.demos import opus100 as opus100_demo
 from tame_mt.exceptions import TameMTError
 from tame_mt.io import ensure_parent_dir, open_text, read_lines, write_lines
 from tame_mt.json_utils import strict_json_dumps
-from tame_mt.native import native_status, native_thread_count
+from tame_mt.native import configure_native_threads, native_status, native_thread_count
 from tame_mt.performance import build_performance_metadata
 from tame_mt.persistence import (
     MAX_BUNDLE_LOAD_BYTES,
@@ -51,18 +51,20 @@ from tame_mt.report import (
     write_segment_jsonl,
     write_segment_metadata,
 )
-from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
+from tame_mt.schema import SCHEMA_VERSION, TameReport
 from tame_mt.version import __version__
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    args._tame_command = ["tame-mt", *(argv if argv is not None else sys.argv[1:])]
     if not hasattr(args, "handler"):
         parser.print_help()
         return 0
     try:
         handler = cast(Callable[[argparse.Namespace], int], args.handler)
+        _configure_native_threads(args)
         _start_profile(args)
         return handler(args)
     except TameMTError as exc:
@@ -91,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="show install, backend, and dependency status",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    _add_thread_arg(doctor_parser)
     doctor_parser.set_defaults(handler=run_doctor)
 
     score_parser = subparsers.add_parser(
@@ -110,7 +113,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     score_parser.add_argument("--hyp", required=True, help="system hypothesis text file")
     score_parser.add_argument("--json-out", help="write the full JSON report")
-    score_parser.add_argument("--segment-out", help="write per-segment JSONL diagnostics")
+    score_parser.add_argument(
+        "--diagnostic-out",
+        help="write privacy-safer per-segment diagnostics without TM text by default",
+    )
+    score_parser.add_argument(
+        "--cache-out",
+        help="write cacheable per-segment artifact with TM text for score-cached",
+    )
+    score_parser.add_argument(
+        "--segment-out",
+        help="deprecated alias for --cache-out; writes cacheable per-segment diagnostics",
+    )
     score_parser.add_argument("--tm-out", help="write translation-memory baseline hypotheses")
     score_parser.add_argument(
         "--quiet", action="store_true", help="suppress human-readable stdout report"
@@ -135,7 +149,18 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--test-src", required=True, help="test source text file")
     audit_parser.add_argument("--ref", action="append", help="reference file; repeat for multi-ref")
     audit_parser.add_argument("--json-out", help="write the full JSON report")
-    audit_parser.add_argument("--segment-out", help="write per-segment JSONL diagnostics")
+    audit_parser.add_argument(
+        "--diagnostic-out",
+        help="write privacy-safer per-segment diagnostics without TM text by default",
+    )
+    audit_parser.add_argument(
+        "--cache-out",
+        help="write cacheable per-segment artifact with TM text for score-cached",
+    )
+    audit_parser.add_argument(
+        "--segment-out",
+        help="deprecated alias for --cache-out; writes cacheable per-segment diagnostics",
+    )
     audit_parser.add_argument(
         "--quiet", action="store_true", help="suppress human-readable stdout report"
     )
@@ -151,7 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     _add_config_args(cached_parser)
-    cached_parser.add_argument("--segment-in", required=True, help="segment JSONL from audit/score")
+    cached_parser.add_argument("--cache-in", help="cache artifact from audit/score --cache-out")
+    cached_parser.add_argument(
+        "--segment-in",
+        help="deprecated alias for --cache-in; segment JSONL from audit/score",
+    )
     cached_parser.add_argument("--ref", action="append", required=True, help="reference file")
     cached_parser.add_argument("--hyp", required=True, help="system hypothesis text file")
     cached_parser.add_argument("--num-train", type=int, help="training segment count")
@@ -173,7 +202,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_config_args(cached_batch_parser)
     cached_batch_parser.add_argument(
-        "--segment-in", required=True, help="segment JSONL from audit/score"
+        "--cache-in", help="cache artifact from audit/score --cache-out"
+    )
+    cached_batch_parser.add_argument(
+        "--segment-in",
+        help="deprecated alias for --cache-in; segment JSONL from audit/score",
     )
     cached_batch_parser.add_argument("--ref", action="append", required=True, help="reference file")
     cached_batch_parser.add_argument(
@@ -238,6 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_verify_parser.add_argument("--train-src", help="optional training source file to verify")
     index_verify_parser.add_argument("--train-tgt", help="optional training target file to verify")
     _add_index_load_args(index_verify_parser)
+    _add_thread_arg(index_verify_parser)
     index_verify_parser.add_argument(
         "--json", action="store_true", help="print machine-readable verification summary"
     )
@@ -261,6 +295,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_profile_arg(tm_parser)
     tm_parser.set_defaults(handler=run_tm_baseline)
+
+    demo_parser = subparsers.add_parser(
+        "demo",
+        help="run packaged public-corpus demos",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    demo_subparsers = demo_parser.add_subparsers(dest="demo_command", required=True)
+    opus100_parser = demo_subparsers.add_parser(
+        "opus100",
+        help="run the OPUS-100 public-corpora demo",
+        description="Run a reproducible TAME-MT audit demo on OPUS-100 public corpora.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    opus100_demo.add_arguments(opus100_parser)
+    opus100_parser.set_defaults(handler=run_demo_opus100)
     return parser
 
 
@@ -279,7 +328,9 @@ def run_doctor(args: argparse.Namespace) -> int:
                 "Native backend: available",
                 f"Native backend version: {status.version}",
                 f"Rayon threads: {native_thread_count()}",
+                "Compiled features: PyO3 extension module, Rayon parallel retrieval",
                 "Default retrieval: exact -> native_exact",
+                "Recommended backend: small/medium/large -> native_exact",
             ]
         )
     else:
@@ -288,6 +339,7 @@ def run_doctor(args: argparse.Namespace) -> int:
                 "Native backend: unavailable",
                 f"Reason: {status.error}",
                 "Default retrieval: exact -> error (native backend required)",
+                "Recommended backend: install or rebuild native_exact before production use",
                 "Repair editable installs: python -m pip install --force-reinstall --no-deps -e .",
             ]
         )
@@ -339,38 +391,17 @@ def run_score(args: argparse.Namespace) -> int:
             write_lines(args.tm_out, result.tm_hyp)
         if args.json_out:
             write_json_report(args.json_out, result.report)
-        if args.segment_out:
-            _warn_neighbor_text(args)
-            include_tm_text = not args.no_tm_text_in_segments
-            write_segment_jsonl(
-                args.segment_out,
-                result.exposures,
-                result.tm_results,
-                train_src=train_src,
-                train_tgt=train_tgt,
-                test_src=test_src,
-                refs=refs,
-                hyp=hyp,
-                include_neighbor_text=args.include_neighbor_text,
-                include_source_text=args.include_source_text,
-                include_reference_text=args.include_reference_text,
-                include_hyp_text=args.include_hyp_text,
-                include_tm_text=include_tm_text,
-            )
-            write_segment_metadata(
-                segment_metadata_path(args.segment_out),
-                result.report,
-                fingerprints=build_segment_fingerprints(
-                    config,
-                    train_src=train_src,
-                    train_tgt=train_tgt,
-                    test_src=test_src,
-                    refs=refs,
-                    tm_results=result.tm_results,
-                ),
-                tm_text_included=include_tm_text,
-                neighbor_text_included=args.include_neighbor_text,
-            )
+        _write_segment_artifacts(
+            args,
+            config=config,
+            result=result,
+            train_src=train_src,
+            train_tgt=train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=hyp,
+            include_hyp_text=args.include_hyp_text,
+        )
     _write_profile_json(args, [result.report])
     if not args.quiet:
         print(render_text_report(result.report))
@@ -415,38 +446,17 @@ def run_audit(args: argparse.Namespace) -> int:
     with _timed_step(args, "write outputs"):
         if args.json_out:
             write_json_report(args.json_out, result.report)
-        if args.segment_out:
-            _warn_neighbor_text(args)
-            include_tm_text = not args.no_tm_text_in_segments
-            write_segment_jsonl(
-                args.segment_out,
-                result.exposures,
-                result.tm_results,
-                train_src=train_src,
-                train_tgt=train_tgt,
-                test_src=test_src,
-                refs=refs,
-                hyp=None,
-                include_neighbor_text=args.include_neighbor_text,
-                include_source_text=args.include_source_text,
-                include_reference_text=args.include_reference_text,
-                include_hyp_text=False,
-                include_tm_text=include_tm_text,
-            )
-            write_segment_metadata(
-                segment_metadata_path(args.segment_out),
-                result.report,
-                fingerprints=build_segment_fingerprints(
-                    config,
-                    train_src=train_src,
-                    train_tgt=train_tgt,
-                    test_src=test_src,
-                    refs=refs,
-                    tm_results=result.tm_results,
-                ),
-                tm_text_included=include_tm_text,
-                neighbor_text_included=args.include_neighbor_text,
-            )
+        _write_segment_artifacts(
+            args,
+            config=config,
+            result=result,
+            train_src=train_src,
+            train_tgt=train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=None,
+            include_hyp_text=False,
+        )
     _write_profile_json(args, [result.report])
     if not args.quiet:
         print(render_text_report(result.report))
@@ -457,30 +467,24 @@ def run_score_cached(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
     _reject_cached_approx_validation(args)
     with _timed_step(args, "read cached inputs"):
-        exposures, tm_results = read_segment_jsonl(args.segment_in)
-        metadata = read_segment_metadata(args.segment_in)
         refs = [read_lines(path) for path in args.ref]
         hyp = read_lines(args.hyp)
-        num_train = _resolve_cached_num_train(args.num_train, metadata, args)
-        _validate_cached_metadata(
-            metadata,
-            config=config,
-            num_train=num_train,
-            exposures=exposures,
-            tm_results=tm_results,
+        artifact = load_cached_artifact(
+            _cache_input_path(args),
             refs=refs,
-            args=args,
+            config=config,
+            num_train=args.num_train,
+            allow_unsafe_no_metadata=args.allow_unsafe_no_metadata,
+            allow_reference_hash_mismatch=args.allow_reference_hash_mismatch,
+            require_tm_text=True,
         )
-        artifact_backend = _artifact_backend_from_metadata(metadata)
+        _warn_reference_hash_override(args)
     scorer = TameScorer(config)
     with _timed_step(args, "score cached hypothesis"):
-        report = scorer.score_from_artifacts(
-            exposures=exposures,
-            tm_results=tm_results,
+        report = scorer.score_from_cached_artifact(
+            artifact=artifact,
             refs=refs,
             hyp=hyp,
-            num_train=num_train,
-            artifact_backend=artifact_backend,
         )
     _attach_report_performance(args, report)
     with _timed_step(args, "write outputs"):
@@ -496,30 +500,24 @@ def run_score_cached_batch(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
     _reject_cached_approx_validation(args)
     with _timed_step(args, "read cached inputs"):
-        exposures, tm_results = read_segment_jsonl(args.segment_in)
-        metadata = read_segment_metadata(args.segment_in)
         refs = [read_lines(path) for path in args.ref]
         systems = _read_system_specs(args.system)
-        num_train = _resolve_cached_num_train(args.num_train, metadata, args)
-        _validate_cached_metadata(
-            metadata,
-            config=config,
-            num_train=num_train,
-            exposures=exposures,
-            tm_results=tm_results,
+        artifact = load_cached_artifact(
+            _cache_input_path(args),
             refs=refs,
-            args=args,
+            config=config,
+            num_train=args.num_train,
+            allow_unsafe_no_metadata=args.allow_unsafe_no_metadata,
+            allow_reference_hash_mismatch=args.allow_reference_hash_mismatch,
+            require_tm_text=True,
         )
-        artifact_backend = _artifact_backend_from_metadata(metadata)
+        _warn_reference_hash_override(args)
     scorer = TameScorer(config)
     with _timed_step(args, "score cached systems"):
-        reports = scorer.score_many_from_artifacts(
-            exposures=exposures,
-            tm_results=tm_results,
+        reports = scorer.score_many_from_cached_artifact(
+            artifact=artifact,
             refs=refs,
             systems=systems,
-            num_train=num_train,
-            artifact_backend=artifact_backend,
         )
         for report in reports.values():
             _attach_report_performance(args, report)
@@ -557,7 +555,7 @@ def run_index_build(args: argparse.Namespace) -> int:
                         if bundle.target_index is not None
                         else "not included"
                     ),
-                    "Privacy:         stores raw training text and normalized exact-match keys",
+                    "Privacy:         stores raw training text and exact-match fingerprints",
                 ]
             )
         )
@@ -648,7 +646,15 @@ def run_tm_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_demo_opus100(args: argparse.Namespace) -> int:
+    command = getattr(args, "_tame_command", None)
+    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+        command = ["tame-mt", "demo", "opus100"]
+    return opus100_demo.run_demo(args, command=command)
+
+
 def _add_config_args(parser: argparse.ArgumentParser) -> None:
+    _add_thread_arg(parser)
     parser.add_argument(
         "--metrics",
         nargs="+",
@@ -669,6 +675,14 @@ def _add_config_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--pair-k", type=int, default=50, help="top-k source/target candidates for pair reranking"
+    )
+    parser.add_argument(
+        "--exact-pair-thresholds",
+        action="store_true",
+        help=(
+            "compute exact no-false-negative PairLeakExact rates at leak thresholds; "
+            "requires exact retrieval and may be expensive"
+        ),
     )
     parser.add_argument(
         "--batch-size",
@@ -796,6 +810,14 @@ def _add_segment_args(parser: argparse.ArgumentParser, *, include_hyp: bool) -> 
         "--include-reference-text", action="store_true", help="include raw reference text in JSONL"
     )
     parser.add_argument(
+        "--include-tm-text",
+        action="store_true",
+        help=(
+            "include TM baseline hypotheses in diagnostic artifacts; cache artifacts include "
+            "TM text by default"
+        ),
+    )
+    parser.add_argument(
         "--no-tm-text-in-segments",
         action="store_true",
         help=(
@@ -834,6 +856,17 @@ def _add_profile_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_thread_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--threads",
+        default="auto",
+        help=(
+            "Rayon worker threads for native retrieval; use 'auto' or a positive integer. "
+            "Must be set before native retrieval starts."
+        ),
+    )
+
+
 def _add_index_load_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--max-index-load-bytes",
@@ -844,6 +877,22 @@ def _add_index_load_args(parser: argparse.ArgumentParser) -> None:
             "on machines with enough memory"
         ),
     )
+
+
+def _configure_native_threads(args: argparse.Namespace) -> None:
+    threads = getattr(args, "threads", "auto")
+    if threads in (None, "auto"):
+        return
+    try:
+        requested_threads = int(threads)
+    except (TypeError, ValueError) as exc:
+        raise TameMTError("--threads must be 'auto' or a positive integer") from exc
+    if requested_threads <= 0:
+        raise TameMTError("--threads must be 'auto' or a positive integer")
+    try:
+        configure_native_threads(requested_threads)
+    except Exception as exc:
+        raise TameMTError(f"failed to configure native threads: {exc}") from exc
 
 
 def _config_from_args(args: argparse.Namespace) -> ScoreConfig:
@@ -881,6 +930,7 @@ def _config_from_args(args: argparse.Namespace) -> ScoreConfig:
             leak_thresholds=leak_thresholds,
             min_bin_size_warning=args.min_bin_size_warning,
         ),
+        pair=PairConfig(exact_thresholds=args.exact_pair_thresholds),
         tm=TMConfig(zero_policy=args.tm_zero_policy),
         metric=MetricConfig(
             bleu_tokenize=args.bleu_tokenize,
@@ -896,6 +946,99 @@ def _warn_neighbor_text(args: argparse.Namespace) -> None:
             "Warning: --include-neighbor-text may write raw training text to the segment report.",
             file=sys.stderr,
         )
+
+
+def _cache_input_path(args: argparse.Namespace) -> str:
+    cache_in = getattr(args, "cache_in", None)
+    segment_in = getattr(args, "segment_in", None)
+    if cache_in and segment_in and cache_in != segment_in:
+        raise TameMTError("--cache-in and --segment-in refer to different files")
+    if segment_in and not cache_in:
+        print("Warning: --segment-in is deprecated; use --cache-in.", file=sys.stderr)
+    path = cache_in or segment_in
+    if not path:
+        raise TameMTError("--cache-in is required")
+    return str(path)
+
+
+def _write_segment_artifacts(
+    args: argparse.Namespace,
+    *,
+    config: ScoreConfig,
+    result: EvaluationResult,
+    train_src: list[str],
+    train_tgt: list[str] | None,
+    test_src: list[str],
+    refs: list[list[str]] | None,
+    hyp: list[str] | None,
+    include_hyp_text: bool,
+) -> None:
+    artifact_specs = _segment_artifact_specs(args)
+    if not artifact_specs:
+        return
+    _warn_neighbor_text(args)
+    fingerprints = build_segment_fingerprints(
+        config,
+        train_src=train_src,
+        train_tgt=train_tgt,
+        test_src=test_src,
+        refs=refs,
+        tm_results=result.tm_results,
+    )
+    for path, include_tm_text in artifact_specs:
+        write_segment_jsonl(
+            path,
+            result.exposures,
+            result.tm_results,
+            train_src=train_src,
+            train_tgt=train_tgt,
+            test_src=test_src,
+            refs=refs,
+            hyp=hyp,
+            include_neighbor_text=args.include_neighbor_text,
+            include_source_text=args.include_source_text,
+            include_reference_text=args.include_reference_text,
+            include_hyp_text=include_hyp_text,
+            include_tm_text=include_tm_text,
+        )
+        write_segment_metadata(
+            segment_metadata_path(path),
+            result.report,
+            fingerprints=fingerprints,
+            tm_text_included=include_tm_text,
+            neighbor_text_included=args.include_neighbor_text,
+        )
+
+
+def _segment_artifact_specs(args: argparse.Namespace) -> list[tuple[str, bool]]:
+    include_tm_text = bool(getattr(args, "include_tm_text", False))
+    omit_tm_text = bool(getattr(args, "no_tm_text_in_segments", False))
+    if include_tm_text and omit_tm_text:
+        raise TameMTError("--include-tm-text cannot be combined with --no-tm-text-in-segments")
+
+    specs: list[tuple[str, bool]] = []
+    seen_paths: dict[str, str] = {}
+
+    def add(path: object, label: str, tm_text: bool) -> None:
+        if not path:
+            return
+        path_text = str(path)
+        previous = seen_paths.get(path_text)
+        if previous is not None:
+            raise TameMTError(f"{label} and {previous} write to the same path: {path_text}")
+        seen_paths[path_text] = label
+        specs.append((path_text, tm_text))
+
+    if getattr(args, "diagnostic_out", None):
+        add(args.diagnostic_out, "--diagnostic-out", include_tm_text)
+    if getattr(args, "cache_out", None):
+        if omit_tm_text:
+            raise TameMTError("--cache-out requires TM text; remove --no-tm-text-in-segments")
+        add(args.cache_out, "--cache-out", True)
+    if getattr(args, "segment_out", None):
+        print("Warning: --segment-out is deprecated; use --cache-out.", file=sys.stderr)
+        add(args.segment_out, "--segment-out", include_tm_text or not omit_tm_text)
+    return specs
 
 
 def _start_profile(args: argparse.Namespace) -> None:
@@ -977,7 +1120,7 @@ def _write_profile_json(
         timings_sec=_profile_timings(args, include_total=True),
     )
     payload = {
-        "schema_version": "0.1",
+        "schema_version": SCHEMA_VERSION,
         "tame_version": __version__,
         "command": getattr(args, "command", None),
         "performance": asdict(performance),
@@ -1072,86 +1215,12 @@ def _required_arg(args: argparse.Namespace, attr: str, flag: str) -> str:
     return str(value)
 
 
-def _validate_num_train_arg(num_train: int) -> None:
-    if num_train <= 0:
-        raise TameMTError("num_train must be positive")
-
-
-def _resolve_cached_num_train(
-    num_train: int | None,
-    metadata: dict[str, object] | None,
-    args: argparse.Namespace,
-) -> int:
-    if metadata is None:
-        if not args.allow_unsafe_no_metadata:
-            raise TameMTError(
-                "segment metadata sidecar is required for cached scoring; pass "
-                "--allow-unsafe-no-metadata only for legacy artifacts you trust"
-            )
-        if num_train is None:
-            raise TameMTError("--num-train is required when segment metadata is missing")
-        _validate_num_train_arg(num_train)
-        return num_train
-
-    metadata_num_train = _metadata_num_train(metadata)
-    if num_train is not None:
-        _validate_num_train_arg(num_train)
-        if num_train != metadata_num_train:
-            raise TameMTError(
-                f"--num-train {num_train} does not match segment metadata num_train "
-                f"{metadata_num_train}"
-            )
-    _validate_num_train_arg(metadata_num_train)
-    return metadata_num_train
-
-
-def _metadata_num_train(metadata: dict[str, object]) -> int:
-    data = metadata.get("data")
-    if not isinstance(data, dict):
-        raise TameMTError("segment metadata data field is required")
-    value = data.get("num_train")
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TameMTError("segment metadata data.num_train must be an integer")
-    return value
-
-
-def _validate_cached_metadata(
-    metadata: dict[str, object] | None,
-    *,
-    config: ScoreConfig,
-    num_train: int,
-    exposures: list[SegmentExposure],
-    tm_results: list[SegmentTMResult],
-    refs: list[list[str]],
-    args: argparse.Namespace,
-) -> None:
-    if metadata is None:
-        return
-    validate_segment_metadata(
-        metadata,
-        config=config,
-        num_train=num_train,
-        num_test=len(exposures),
-        num_refs=len(refs),
-        refs=refs,
-        tm_results=tm_results,
-        allow_reference_hash_mismatch=args.allow_reference_hash_mismatch,
-        require_tm_text=True,
-    )
+def _warn_reference_hash_override(args: argparse.Namespace) -> None:
     if args.allow_reference_hash_mismatch:
         print(
             "Warning: --allow-reference-hash-mismatch may reuse stale target/pair exposure.",
             file=sys.stderr,
         )
-
-
-def _artifact_backend_from_metadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
-    if metadata is None:
-        return None
-    backend = metadata.get("backend")
-    if isinstance(backend, dict):
-        return dict(backend)
-    return None
 
 
 def _parse_metrics(values: list[str]) -> tuple[str, ...]:

@@ -1,8 +1,14 @@
+mod exact;
+mod fast;
+mod pair;
 mod query;
 #[cfg(test)]
 mod tests;
 mod validation;
+mod workspace;
 
+use crate::fingerprint::exact_fingerprint;
+use crate::index::workspace::QueryWorkspace;
 use crate::ngrams::char_ngram_slices;
 use crate::types::{DocId, ExactMap, GramId, GramToIdMap, NeighborTuple};
 use pyo3::exceptions::{PyIndexError, PyOSError, PyValueError};
@@ -79,7 +85,7 @@ impl NativeNgramIndex {
         let mut exact_map = ExactMap::default();
 
         for (idx, line) in normalized_lines.iter().enumerate() {
-            exact_map.entry(line.clone()).or_insert(idx);
+            exact_map.entry(exact_fingerprint(line)).or_insert(idx);
             let grams = char_ngram_slices(line, &ngram_orders);
             let mut doc_grams: Vec<GramId> = Vec::with_capacity(grams.len());
             for gram in grams {
@@ -166,11 +172,20 @@ impl NativeNgramIndex {
     }
 
     fn contains_exact(&self, query_norm: &str) -> bool {
-        self.exact_map.contains_key(query_norm)
+        self.exact_map.contains_key(&exact_fingerprint(query_norm))
     }
 
     fn query_topk(&self, query_norm: &str, k: usize) -> Vec<NeighborTuple> {
         self.query_topk_impl(query_norm, k)
+    }
+
+    fn query_topk_exact(&self, query_norm: &str, k: usize) -> Vec<NeighborTuple> {
+        let mut workspace = QueryWorkspace::new(self.gram_sets.len());
+        self.query_topk_exact_impl(query_norm, k, &mut workspace)
+    }
+
+    fn query_topk_fast(&self, query_norm: &str, k: usize) -> Vec<NeighborTuple> {
+        self.query_topk_fast_impl(query_norm, k)
     }
 
     fn batch_query_topk(
@@ -182,7 +197,41 @@ impl NativeNgramIndex {
         py.detach(|| {
             queries
                 .par_iter()
-                .map(|query| self.query_topk_impl(query, k))
+                .map_init(
+                    || QueryWorkspace::new(self.gram_sets.len()),
+                    |workspace, query| self.query_topk_with_workspace(query, k, workspace),
+                )
+                .collect()
+        })
+    }
+
+    fn batch_query_topk_exact(
+        &self,
+        py: Python<'_>,
+        queries: Vec<String>,
+        k: usize,
+    ) -> Vec<Vec<NeighborTuple>> {
+        py.detach(|| {
+            queries
+                .par_iter()
+                .map_init(
+                    || QueryWorkspace::new(self.gram_sets.len()),
+                    |workspace, query| self.query_topk_exact_impl(query, k, workspace),
+                )
+                .collect()
+        })
+    }
+
+    fn batch_query_topk_fast(
+        &self,
+        py: Python<'_>,
+        queries: Vec<String>,
+        k: usize,
+    ) -> Vec<Vec<NeighborTuple>> {
+        py.detach(|| {
+            queries
+                .par_iter()
+                .map(|query| self.query_topk_fast_impl(query, k))
                 .collect()
         })
     }

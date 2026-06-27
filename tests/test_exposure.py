@@ -1,4 +1,4 @@
-from tame_mt.config import IndexConfig, ScoreConfig
+from tame_mt.config import BinConfig, IndexConfig, PairConfig, ScoreConfig
 from tame_mt.exposure import compute_exposure, summarize_exposures
 from tame_mt.schema import SegmentExposure
 
@@ -43,6 +43,41 @@ def test_exact_pair_overlap_is_exact() -> None:
     assert exposures[0].pair_exposure == 1.0
 
 
+def test_exact_pair_thresholds_can_catch_topk_pair_miss() -> None:
+    test_source = "shared segment with many common words and token one"
+    near_source = "shared segment with many common words and token two"
+    ref = "the quick brown fox jumps over the lazy dog"
+    near_target = "the quick brown fox jumps over the lazy cat"
+
+    exposures = compute_exposure(
+        train_src=[
+            test_source,
+            near_source,
+            "unrelated source text",
+        ],
+        train_tgt=[
+            "unrelated target text",
+            near_target,
+            ref,
+        ],
+        test_src=[test_source],
+        refs=[[ref]],
+        config=ScoreConfig(
+            index=IndexConfig(topk=1),
+            bins=BinConfig(leak_thresholds=(0.85,)),
+            pair=PairConfig(exact_thresholds=True),
+        ),
+    )
+    summary = summarize_exposures(exposures, ScoreConfig(bins=BinConfig(leak_thresholds=(0.85,))))
+
+    assert exposures[0].pair_exposure is not None
+    assert exposures[0].pair_exposure < 0.85
+    assert exposures[0].pair_exact_at_threshold == {"0.85": True}
+    assert summary.pair is not None
+    assert summary.pair["at_threshold"]["0.85"] == 0.0
+    assert summary.pair["exact_at_threshold"]["0.85"] == 1.0
+
+
 def test_pair_fields_are_absent_without_references() -> None:
     exposures = compute_exposure(
         train_src=["a b c"],
@@ -53,6 +88,21 @@ def test_pair_fields_are_absent_without_references() -> None:
     )
     assert exposures[0].pair_exact is None
     assert exposures[0].pair_exposure is None
+
+
+def test_train_targets_without_references_do_not_build_target_exposure() -> None:
+    exposures = compute_exposure(
+        train_src=["shared source", "other source"],
+        train_tgt=["matching target", "other target"],
+        test_src=["shared source"],
+        refs=None,
+        config=ScoreConfig(),
+    )
+
+    assert exposures[0].source_exact is True
+    assert exposures[0].target_exposure is None
+    assert exposures[0].target_exact is None
+    assert exposures[0].pair_exact is None
 
 
 def test_multi_ref_exposure_records_best_reference_indices() -> None:

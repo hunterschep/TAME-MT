@@ -17,11 +17,16 @@ fast-retrieval recall characterization, source/wheel build checks, clean-venv
 wheel smoke tests, CLI smoke tests, index reuse, cached scoring, and the public
 corpus demo.
 
+Use the root [release-checklist.md](../release-checklist.md) as the operator
+checklist for version bumps, local acceptance, tag validation, trusted
+publishing, and post-release smoke checks.
+
 Before committing a release candidate, remove generated artifacts:
 
 ```bash
 rm -rf build dist src/tame_mt.egg-info
 find src/tame_mt -maxdepth 1 \( -name '_native*.so' -o -name '_native*.pyd' -o -name '_native*.dylib' \) -delete
+find src/tame_mt -type d -name '__pycache__' -prune -exec rm -rf {} +
 ```
 
 ## Version And Changelog
@@ -41,8 +46,9 @@ The `Release` workflow supports two modes:
 - `workflow_dispatch` from a branch or tag builds and validates distributions as
   a dry run.
 - pushing a `v*` tag builds the source distribution and wheels, runs wheel smoke
-  tests, runs `twine check`, and generates an SBOM artifact. It does not
-  publish automatically.
+  tests, runs `twine check`, installs the Linux CPython 3.12 release wheel,
+  runs synthetic benchmark smoke checks from that installed artifact, and
+  generates an SBOM artifact. It does not publish automatically.
 - `workflow_dispatch` from a `v*` tag with `publish=true` publishes the already
   validated artifacts to PyPI through trusted publishing after the protected
   `pypi` environment allows the job to proceed.

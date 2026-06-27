@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from tame_mt.artifacts import (
+    build_segment_fingerprints,
+    load_cached_artifact,
     read_segment_jsonl,
     read_segment_metadata,
     segment_metadata_path,
@@ -45,13 +47,41 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 
 def _metadata(config: ScoreConfig | None = None) -> dict[str, object]:
     return {
-        "schema_version": "0.1",
+        "schema_version": "1.0",
         "artifact": "segment_jsonl",
         "signature": "tame-mt|test",
         "data": {"num_train": 4, "num_test": 1, "num_refs": 1},
         "config": config_to_dict(config or ScoreConfig()),
         "backend": {"name": "native_exact"},
     }
+
+
+def _write_metadata(path: Path, metadata: dict[str, object]) -> None:
+    segment_metadata_path(path).write_text(
+        json.dumps(metadata, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _validated_metadata(
+    *,
+    config: ScoreConfig | None = None,
+    refs: list[list[str]] | None = None,
+    tm_results: list[SegmentTMResult] | None = None,
+) -> dict[str, object]:
+    score_config = config or ScoreConfig()
+    metadata = _metadata(score_config)
+    metadata["privacy"] = {
+        "tm_text_included": True,
+        "contains_training_target_text": True,
+        "contains_neighbor_training_text": False,
+    }
+    metadata["fingerprints"] = build_segment_fingerprints(
+        score_config,
+        refs=refs,
+        tm_results=tm_results,
+    )
+    return metadata
 
 
 def test_validate_segment_artifacts_keeps_aligned_rows() -> None:
@@ -130,6 +160,17 @@ def test_read_segment_jsonl_parses_optional_reference_indices(tmp_path: Path) ->
 
     assert exposures[0].target_ref_index == 2
     assert exposures[0].pair_ref_index == 1
+
+
+def test_read_segment_jsonl_parses_pair_exact_threshold_flags(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["pair_exact_at_threshold"] = {"0.85": "true", "0.95": 0}
+    _write_jsonl(path, [row])
+
+    exposures, _ = read_segment_jsonl(path)
+
+    assert exposures[0].pair_exact_at_threshold == {"0.85": True, "0.95": False}
 
 
 def test_read_segment_jsonl_defaults_missing_reference_indices(tmp_path: Path) -> None:
@@ -259,6 +300,89 @@ def test_read_segment_metadata_reads_sidecar(tmp_path: Path) -> None:
 
 def test_read_segment_metadata_returns_none_without_sidecar(tmp_path: Path) -> None:
     assert read_segment_metadata(tmp_path / "segments.jsonl") is None
+
+
+def test_load_cached_artifact_validates_metadata_and_infers_train_count(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "segments.jsonl"
+    _write_jsonl(path, [_payload(0)])
+    exposures, tm_results = read_segment_jsonl(path)
+    refs = [["reference 0"]]
+    _write_metadata(
+        path,
+        _validated_metadata(
+            refs=refs,
+            tm_results=tm_results,
+        ),
+    )
+
+    artifact = load_cached_artifact(path, refs=refs)
+
+    assert artifact.num_train == 4
+    assert artifact.exposures == exposures
+    assert artifact.tm_results == tm_results
+    assert artifact.metadata is not None
+    assert artifact.artifact_backend == {"name": "native_exact"}
+
+
+def test_load_cached_artifact_rejects_missing_metadata_by_default(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    _write_jsonl(path, [_payload(0)])
+
+    with pytest.raises(InputDataError, match="metadata sidecar is required"):
+        load_cached_artifact(path, refs=[["reference 0"]])
+
+
+def test_load_cached_artifact_accepts_trusted_legacy_artifact_with_train_count(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "segments.jsonl"
+    _write_jsonl(path, [_payload(0)])
+
+    artifact = load_cached_artifact(
+        path,
+        refs=[["reference 0"]],
+        num_train=4,
+        allow_unsafe_no_metadata=True,
+    )
+
+    assert artifact.num_train == 4
+    assert artifact.metadata is None
+    assert artifact.artifact_backend is None
+
+
+def test_load_cached_artifact_rejects_reference_hash_mismatch(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    _write_jsonl(path, [_payload(0)])
+    _, tm_results = read_segment_jsonl(path)
+    _write_metadata(
+        path,
+        _validated_metadata(
+            refs=[["original reference"]],
+            tm_results=tm_results,
+        ),
+    )
+
+    with pytest.raises(ConfigurationError, match="reference hash mismatch"):
+        load_cached_artifact(path, refs=[["different reference"]])
+
+
+def test_load_cached_artifact_requires_tm_text_for_scoring(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row.pop("tm_hyp")
+    _write_jsonl(path, [row])
+    _, tm_results = read_segment_jsonl(path)
+    refs = [["reference 0"]]
+    metadata = _validated_metadata(refs=refs, tm_results=tm_results)
+    privacy = metadata["privacy"]
+    assert isinstance(privacy, dict)
+    privacy["tm_text_included"] = False
+    _write_metadata(path, metadata)
+
+    with pytest.raises(InputDataError, match="does not contain TM hypotheses"):
+        load_cached_artifact(path, refs=refs)
 
 
 def test_validate_segment_metadata_rejects_schema_mismatch() -> None:

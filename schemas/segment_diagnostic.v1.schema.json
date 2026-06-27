@@ -59,6 +59,19 @@
     "pair_exact": {
       "$ref": "#/$defs/nullableBoolean"
     },
+    "pair_exact_at_threshold": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "bin": {
       "enum": ["source_exact", "near", "medium", "far"]
     },

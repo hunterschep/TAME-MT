@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "tame-mt"
-version = "0.1.0"
+version = "0.2.0"
 description = "Training-aware machine translation evaluation for MT."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,6 +43,7 @@ Issues = "https://github.com/hunterschep/TAME-MT/issues"
 [project.optional-dependencies]
 dev = [
   "build>=1.0",
+  "hypothesis>=6.100",
   "jsonschema>=4.20",
   "maturin>=1.7,<2",
   "mypy>=1.8",
@@ -56,7 +57,17 @@ dev = [
 tame-mt = "tame_mt.cli:main"
 
 [tool.maturin]
-exclude = ["demo_runs/**", "dist/**", "target/**"]
+exclude = [
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/*.pyo",
+  "**/*.so",
+  "**/*.pyd",
+  "**/*.dylib",
+  "demo_runs/**",
+  "dist/**",
+  "target/**",
+]
 features = ["pyo3/extension-module"]
 include = ["schemas/*.json"]
 module-name = "tame_mt._native"

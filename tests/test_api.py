@@ -5,14 +5,17 @@ import pytest
 import tame_mt
 from tame_mt import (
     BinConfig,
+    CachedArtifact,
     CachedSegmentScorer,
     IndexVerification,
     MetricConfig,
+    PairConfig,
     RetrievalConfig,
     ScoreConfig,
     SegmentExposure,
     SegmentTMResult,
     TameScorer,
+    load_cached_artifact,
     read_segment_jsonl,
     read_segment_metadata,
     segment_metadata_path,
@@ -26,9 +29,12 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_public_api_exports_cached_scoring_types() -> None:
+    assert CachedArtifact.__name__ == "CachedArtifact"
     assert CachedSegmentScorer.__name__ == "CachedSegmentScorer"
     assert IndexVerification.__name__ == "IndexVerification"
+    assert load_cached_artifact.__name__ == "load_cached_artifact"
     assert MetricConfig.__name__ == "MetricConfig"
+    assert PairConfig.__name__ == "PairConfig"
     assert RetrievalConfig.__name__ == "RetrievalConfig"
     assert SegmentExposure.__name__ == "SegmentExposure"
     assert SegmentTMResult.__name__ == "SegmentTMResult"
@@ -38,9 +44,12 @@ def test_public_api_exports_cached_scoring_types() -> None:
     assert validate_segment_metadata.__name__ == "validate_segment_metadata"
     assert verify_index_bundle.__name__ == "verify_index_bundle"
     for name in (
+        "CachedArtifact",
         "CachedSegmentScorer",
         "IndexVerification",
+        "load_cached_artifact",
         "MetricConfig",
+        "PairConfig",
         "RetrievalConfig",
         "SegmentExposure",
         "SegmentTMResult",
@@ -139,6 +148,37 @@ def test_score_many_from_artifacts_matches_single_system_reports() -> None:
         batch_reports["variant"].system_scores["chrf"]
         != batch_reports["baseline"].system_scores["chrf"]
     )
+
+
+def test_score_from_cached_artifact_uses_artifact_metadata() -> None:
+    artifact = CachedArtifact(
+        exposures=[
+            _segment(0, 1.0, "source_exact"),
+            _segment(1, 0.1, "far"),
+        ],
+        tm_results=[
+            SegmentTMResult(index=0, tm_hyp="good", tm_source_index=0, tm_source_similarity=1.0),
+            SegmentTMResult(index=1, tm_hyp="bad", tm_source_index=1, tm_source_similarity=0.1),
+        ],
+        metadata={"signature": "tame-mt|test"},
+        num_train=12,
+        artifact_backend={
+            "name": "native_exact",
+            "native": True,
+            "exact": True,
+        },
+    )
+
+    report = TameScorer().score_from_cached_artifact(
+        artifact,
+        refs=[["good", "bad"]],
+        hyp=["good", "bad"],
+        system_name="baseline",
+    )
+
+    assert report.num_train == 12
+    assert report.backend["artifact_backend"]["name"] == "native_exact"
+    assert report.system_scores["bleu"] is not None
 
 
 def test_score_from_artifacts_records_artifact_backend_provenance() -> None:

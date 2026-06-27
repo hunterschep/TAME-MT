@@ -3,13 +3,14 @@ from __future__ import annotations
 import io
 import tempfile
 import zipfile
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
 
 from tame_mt.config import ScoreConfig
-from tame_mt.exact import build_exact_pair_keys
+from tame_mt.exact import EXACT_PAIR_KEY_BYTES, ExactPairKeys, exact_pair_key
 from tame_mt.exceptions import BackendError, ConfigurationError, InputDataError
 from tame_mt.index import NgramInvertedIndex
 from tame_mt.io import ensure_parent_dir, validate_equal_lengths
@@ -21,7 +22,7 @@ from tame_mt.version import __version__
 
 INDEX_FORMAT = "tameidx"
 FORMAT_VERSION = 3
-NATIVE_INDEX_SCHEMA_VERSION = 3
+NATIVE_INDEX_SCHEMA_VERSION = 4
 
 MANIFEST_NAME = "manifest.json"
 TRAIN_SRC_NAME = "train.src"
@@ -49,7 +50,7 @@ class IndexBundle:
     train_tgt: list[str] | None
     source_index: NgramInvertedIndex
     target_index: NgramInvertedIndex | None
-    exact_pair_keys: set[str] | None
+    exact_pair_keys: ExactPairKeys | None
     manifest: dict[str, Any]
 
 
@@ -94,11 +95,25 @@ def save_index_bundle(
     if train_tgt is not None:
         validate_equal_lengths("train.src", train_src, "train.tgt", train_tgt)
 
+    exact_pair_keys = None
+    target_normalized_sha256 = None
+    if train_tgt is None:
+        source_normalized_sha256 = _hash_lines(
+            normalize_text(line, config.normalization) for line in train_src
+        )
+    else:
+        (
+            exact_pair_keys,
+            source_normalized_sha256,
+            target_normalized_sha256,
+        ) = _build_exact_pair_keys_and_normalized_hashes(train_src, train_tgt, config)
+
     source_index = NgramInvertedIndex.build(
         train_src,
         norm_config=config.normalization,
         sim_config=config.similarity,
         index_config=config.index,
+        keep_normalized_lines=False,
     )
     _require_native_index(source_index, "source")
 
@@ -109,16 +124,12 @@ def save_index_bundle(
             norm_config=config.normalization,
             sim_config=config.similarity,
             index_config=config.index,
+            keep_normalized_lines=False,
         )
         _require_native_index(target_index, "target")
 
     source_index_bytes = source_index.native_bytes()
     target_index_bytes = target_index.native_bytes() if target_index is not None else None
-    exact_pair_keys = (
-        build_exact_pair_keys(source_index.normalized_lines, target_index.normalized_lines)
-        if target_index is not None
-        else None
-    )
     exact_pair_keys_bytes = (
         _encode_exact_pair_keys(exact_pair_keys) if exact_pair_keys is not None else None
     )
@@ -130,6 +141,8 @@ def save_index_bundle(
         source_index_bytes,
         target_index_bytes,
         exact_pair_keys_bytes,
+        source_normalized_sha256,
+        target_normalized_sha256,
         config,
     )
     output_path = Path(path)
@@ -301,6 +314,8 @@ def _build_manifest(
     source_index_bytes: bytes,
     target_index_bytes: bytes | None,
     exact_pair_keys_bytes: bytes | None,
+    source_normalized_sha256: str,
+    target_normalized_sha256: str | None,
     config: ScoreConfig,
 ) -> dict[str, Any]:
     return {
@@ -332,16 +347,16 @@ def _build_manifest(
         "hashes": _build_manifest_hashes(
             train_src=train_src,
             train_tgt=train_tgt,
-            source_normalized=source_index.normalized_lines,
-            target_normalized=target_index.normalized_lines if target_index is not None else None,
+            source_normalized_sha256=source_normalized_sha256,
+            target_normalized_sha256=target_normalized_sha256,
             source_index_bytes=source_index_bytes,
             target_index_bytes=target_index_bytes,
             exact_pair_keys_bytes=exact_pair_keys_bytes,
         ),
         "privacy": {
             "stores_raw_training_text": True,
-            "stores_normalized_exact_match_keys": True,
-            "stores_normalized_pair_keys": exact_pair_keys_bytes is not None,
+            "stores_exact_match_fingerprints": True,
+            "stores_pair_fingerprints": exact_pair_keys_bytes is not None,
         },
     }
 
@@ -356,21 +371,21 @@ def _build_manifest_hashes(
     *,
     train_src: list[str],
     train_tgt: list[str] | None,
-    source_normalized: list[str],
-    target_normalized: list[str] | None,
+    source_normalized_sha256: str,
+    target_normalized_sha256: str | None,
     source_index_bytes: bytes,
     target_index_bytes: bytes | None,
     exact_pair_keys_bytes: bytes | None,
 ) -> dict[str, str]:
     hashes = {
         "train_src_sha256": _hash_lines(train_src),
-        "train_src_normalized_sha256": _hash_lines(source_normalized),
+        "train_src_normalized_sha256": source_normalized_sha256,
         "source_index_sha256": _sha256_bytes(source_index_bytes),
     }
     if train_tgt is not None:
         hashes["train_tgt_sha256"] = _hash_lines(train_tgt)
-    if target_normalized is not None:
-        hashes["train_tgt_normalized_sha256"] = _hash_lines(target_normalized)
+    if target_normalized_sha256 is not None:
+        hashes["train_tgt_normalized_sha256"] = target_normalized_sha256
     if target_index_bytes is not None:
         hashes["target_index_sha256"] = _sha256_bytes(target_index_bytes)
     if exact_pair_keys_bytes is not None:
@@ -849,7 +864,7 @@ def _read_bytes_member(archive: zipfile.ZipFile, name: str) -> bytes:
     return _read_member_bytes(archive, name, max_size=MAX_NATIVE_INDEX_BYTES)
 
 
-def _read_exact_pair_keys_member(archive: zipfile.ZipFile) -> set[str] | None:
+def _read_exact_pair_keys_member(archive: zipfile.ZipFile) -> ExactPairKeys | None:
     if not _has_archive_member(archive, EXACT_PAIR_KEYS_NAME):
         return None
     try:
@@ -883,43 +898,64 @@ def _encode_lines(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _encode_exact_pair_keys(keys: set[str]) -> bytes:
-    payload = bytearray()
-    for key in sorted(keys):
-        encoded = key.encode("utf-8")
-        payload.extend(len(encoded).to_bytes(8, byteorder="little", signed=False))
-        payload.extend(encoded)
-    return bytes(payload)
-
-
-def _decode_exact_pair_keys(payload: bytes) -> set[str]:
-    keys: set[str] = set()
-    offset = 0
-    payload_len = len(payload)
-    while offset < payload_len:
-        if offset + 8 > payload_len:
-            raise ConfigurationError("index bundle exact-pair key member is truncated")
-        key_len = int.from_bytes(payload[offset : offset + 8], byteorder="little", signed=False)
-        offset += 8
-        end = offset + key_len
-        if end > payload_len:
-            raise ConfigurationError("index bundle exact-pair key member is truncated")
-        keys.add(payload[offset:end].decode("utf-8"))
-        offset = end
+def _encode_exact_pair_keys(keys: ExactPairKeys) -> bytes:
+    if len(keys) % EXACT_PAIR_KEY_BYTES != 0:
+        raise ConfigurationError("exact-pair key payload is truncated")
+    _validate_exact_pair_keys_sorted(keys, "exact-pair key payload")
     return keys
+
+
+def _decode_exact_pair_keys(payload: bytes) -> ExactPairKeys:
+    if len(payload) % EXACT_PAIR_KEY_BYTES != 0:
+        raise ConfigurationError("index bundle exact-pair key member is truncated")
+    _validate_exact_pair_keys_sorted(payload, "index bundle exact-pair key member")
+    return payload
+
+
+def _validate_exact_pair_keys_sorted(payload: bytes, label: str) -> None:
+    previous: bytes | None = None
+    for offset in range(0, len(payload), EXACT_PAIR_KEY_BYTES):
+        current = payload[offset : offset + EXACT_PAIR_KEY_BYTES]
+        if previous is not None and current < previous:
+            raise ConfigurationError(f"{label} is not sorted")
+        previous = current
 
 
 def _jsonable(value: Any) -> Any:
     return strict_json_loads(strict_json_dumps(value, ensure_ascii=False))
 
 
-def _hash_lines(lines: list[str]) -> str:
+def _hash_lines(lines: Iterable[str]) -> str:
     digest = sha256()
     for line in lines:
         encoded = line.encode("utf-8")
         digest.update(len(encoded).to_bytes(8, byteorder="big", signed=False))
         digest.update(encoded)
     return digest.hexdigest()
+
+
+def _build_exact_pair_keys_and_normalized_hashes(
+    train_src: list[str],
+    train_tgt: list[str],
+    config: ScoreConfig,
+) -> tuple[ExactPairKeys, str, str]:
+    source_digest = sha256()
+    target_digest = sha256()
+    keys: list[bytes] = []
+    for source, target in zip(train_src, train_tgt, strict=True):
+        normalized_source = normalize_text(source, config.normalization)
+        normalized_target = normalize_text(target, config.normalization)
+        _update_line_hash(source_digest, normalized_source)
+        _update_line_hash(target_digest, normalized_target)
+        keys.append(exact_pair_key(normalized_source, normalized_target))
+    keys.sort()
+    return b"".join(keys), source_digest.hexdigest(), target_digest.hexdigest()
+
+
+def _update_line_hash(digest: Any, line: str) -> None:
+    encoded = line.encode("utf-8")
+    digest.update(len(encoded).to_bytes(8, byteorder="big", signed=False))
+    digest.update(encoded)
 
 
 def _normalized_lines(lines: list[str], config: ScoreConfig) -> list[str]:

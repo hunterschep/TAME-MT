@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from tame_mt.artifacts import validate_segment_artifacts
+from tame_mt.artifacts import CachedArtifact, validate_segment_artifacts
 from tame_mt.bins import (
     ALL_GROUP,
     TM_GROUP,
@@ -15,6 +15,7 @@ from tame_mt.bins import (
     score_corpus_and_bins,
 )
 from tame_mt.config import ScoreConfig
+from tame_mt.exact import ExactPairKeys
 from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.exposure import compute_exposure_result, summarize_exposures
 from tame_mt.index import NgramInvertedIndex
@@ -223,6 +224,27 @@ class TameScorer:
             artifact_backend=artifact_backend,
         ).score_many(systems)
 
+    def score_from_cached_artifact(
+        self,
+        artifact: CachedArtifact,
+        refs: list[list[str]],
+        hyp: list[str],
+        *,
+        system_name: str = "system",
+    ) -> TameReport:
+        return self.prepare_from_cached_artifact(artifact, refs).score(
+            hyp,
+            system_name=system_name,
+        )
+
+    def score_many_from_cached_artifact(
+        self,
+        artifact: CachedArtifact,
+        refs: list[list[str]],
+        systems: Mapping[str, list[str]],
+    ) -> dict[str, TameReport]:
+        return self.prepare_from_cached_artifact(artifact, refs).score_many(systems)
+
     def prepare_from_artifacts(
         self,
         exposures: list[SegmentExposure],
@@ -238,6 +260,19 @@ class TameScorer:
             refs=refs,
             num_train=num_train,
             artifact_backend=artifact_backend,
+        )
+
+    def prepare_from_cached_artifact(
+        self,
+        artifact: CachedArtifact,
+        refs: list[list[str]],
+    ) -> CachedSegmentScorer:
+        return self.prepare_from_artifacts(
+            exposures=artifact.exposures,
+            tm_results=artifact.tm_results,
+            refs=refs,
+            num_train=artifact.num_train,
+            artifact_backend=artifact.artifact_backend,
         )
 
     def evaluate_index_bundle(
@@ -273,21 +308,17 @@ class TameScorer:
         )
 
     def _validate_bundle_config(self, bundle: IndexBundle) -> None:
-        if bundle.source_index.norm_config != self.config.normalization:
-            raise ConfigurationError("index bundle normalization does not match scorer config")
-        if bundle.source_index.sim_config != self.config.similarity:
-            raise ConfigurationError("index bundle similarity does not match scorer config")
-        if bundle.source_index.index_config != self.config.index:
-            raise ConfigurationError("index bundle retrieval settings do not match scorer config")
+        _validate_index_compatible_with_scorer(
+            bundle.source_index,
+            self.config,
+            label="source",
+        )
         if bundle.target_index is not None:
-            if bundle.target_index.norm_config != self.config.normalization:
-                raise ConfigurationError("target index normalization does not match scorer config")
-            if bundle.target_index.sim_config != self.config.similarity:
-                raise ConfigurationError("target index similarity does not match scorer config")
-            if bundle.target_index.index_config != self.config.index:
-                raise ConfigurationError(
-                    "target index retrieval settings do not match scorer config"
-                )
+            _validate_index_compatible_with_scorer(
+                bundle.target_index,
+                self.config,
+                label="target",
+            )
 
     def evaluate_corpus(
         self,
@@ -329,7 +360,7 @@ class TameScorer:
         hyp: list[str] | None,
         source_index: NgramInvertedIndex | None,
         target_index: NgramInvertedIndex | None,
-        exact_pair_keys: set[str] | None,
+        exact_pair_keys: ExactPairKeys | None,
         index_reused: bool,
     ) -> EvaluationResult:
         exposure_result = compute_exposure_result(
@@ -468,6 +499,35 @@ def _validate_cached_bins(exposures: list[SegmentExposure], config: ScoreConfig)
             )
 
 
+def _validate_index_compatible_with_scorer(
+    index: NgramInvertedIndex,
+    config: ScoreConfig,
+    *,
+    label: str,
+) -> None:
+    if index.norm_config != config.normalization:
+        raise ConfigurationError(f"{label} index normalization does not match scorer config")
+    if index.sim_config != config.similarity:
+        raise ConfigurationError(f"{label} index similarity does not match scorer config")
+
+    resolved_mode = index.backend_info.resolved_mode
+    requested_mode = config.index.mode
+    if requested_mode != "auto" and requested_mode != resolved_mode:
+        raise ConfigurationError(
+            f"{label} index backend is {resolved_mode}, but scorer requested {requested_mode}"
+        )
+
+    if resolved_mode == "native_fast":
+        for key in ("candidate_gram_limit", "posting_limit", "max_candidates", "rerank_limit"):
+            saved_value = getattr(index.index_config, key)
+            requested_value = getattr(config.index, key)
+            if saved_value != requested_value:
+                raise ConfigurationError(
+                    f"{label} index fast setting {key}={saved_value} does not match "
+                    f"scorer value {requested_value}"
+                )
+
+
 def _build_cached_report(
     *,
     config: ScoreConfig,
@@ -538,6 +598,8 @@ def _retrieval_semantics(
     pair_mode = "none"
     if has_pair:
         pair_mode = "approx_topk" if approximate else "topk_rerank"
+        if config.pair.exact_thresholds and not approximate:
+            pair_mode = "topk_rerank+threshold_exact"
     thresholds = (
         []
         if approximate

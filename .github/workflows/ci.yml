@@ -91,6 +91,8 @@ jobs:
         run: python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
       - name: Fast retrieval recall validation
         run: python benchmarks/validate_fast_recall.py --require-native
+      - name: Exact threshold validation
+        run: python benchmarks/validate_threshold_exact.py --require-native
 
   performance:
     name: Performance regression smoke
@@ -115,9 +117,10 @@ jobs:
             --train-size 50000 \
             --test-size 1000 \
             --staged \
-            --max-seconds 20 \
+            --max-seconds 10 \
             --max-index-build-seconds 20 \
             --max-indexed-seconds 8 \
+            --max-indexed-audit-seconds 4 \
             --max-cached-seconds 5 \
             --max-prepared-cached-seconds 2 \
             --max-cached-batch-per-system-seconds 2 \
@@ -142,6 +145,8 @@ jobs:
             --assert-thresholds
       - name: Broader fast retrieval recall validation
         run: python benchmarks/validate_fast_recall.py --require-native --train-size 5000 --test-size 500
+      - name: Broader exact threshold validation
+        run: python benchmarks/validate_threshold_exact.py --require-native
 
   dependency-compatibility:
     name: SacreBLEU compatibility (${{ matrix.sacrebleu }})

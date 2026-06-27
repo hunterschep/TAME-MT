@@ -5,6 +5,8 @@ from typing import Any
 
 from tame_mt.json_utils import strict_json_dumps
 
+SCHEMA_VERSION = "1.0"
+
 
 @dataclass(slots=True)
 class SegmentExposure:
@@ -21,6 +23,7 @@ class SegmentExposure:
     bin: str
     target_ref_index: int | None = None
     pair_ref_index: int | None = None
+    pair_exact_at_threshold: dict[str, bool] | None = None
 
 
 @dataclass(slots=True)
@@ -91,7 +94,7 @@ class TameReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": "0.1",
+            "schema_version": SCHEMA_VERSION,
             "tame_version": self.tame_version,
             "signature": self.signature,
             "data": {

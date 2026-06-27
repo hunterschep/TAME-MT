@@ -105,8 +105,11 @@ result = TameScorer(config).evaluate_index_bundle(
 `result.report.backend["index_reused"]` is `True` for this path. Bundle loading
 validates normalization, similarity, backend mode, and fast-mode settings before
 scoring so stale indexes do not silently produce mismatched signatures.
+Exact bundles can still be reused with different query-time settings such as
+`IndexConfig.topk` and `IndexConfig.batch_size`; those settings affect
+evaluation, not the persisted index bytes.
 It also enforces a default uncompressed load-memory budget before reading raw
-training text, native index bytes, or exact-pair keys into memory. Pass
+training text, native index bytes, or exact-pair fingerprints into memory. Pass
 `max_load_bytes=...` only for trusted large bundles on machines with enough
 RAM, or `max_load_bytes=None` to disable that guard deliberately.
 
@@ -121,45 +124,68 @@ verification = verify_index_bundle(
 print(verification.to_dict()["checked_hashes"])
 ```
 
-Index bundles store raw training text and normalized exact-match and pair keys.
+Index bundles store raw training text plus exact-match and pair fingerprints.
 Treat them as training data.
+
+## Retrieval Internals
+
+Public scoring code should normally use `TameScorer`, but lower-level retrieval
+types are available from `tame_mt.index` for tests, diagnostics, and benchmark
+work:
+
+```python
+from tame_mt.index import (
+    NgramInvertedIndex,
+    PythonExactSimilarityIndex,
+    SimilarityIndex,
+)
+```
+
+`NgramInvertedIndex` is the production native-backed wrapper. It resolves
+`auto` to `native_exact` when the installed extension is available and refuses
+to run if the extension is missing. `PythonExactSimilarityIndex` is a small
+reference implementation used for parity tests and debugging; it is not the CLI
+fallback for large or production audits.
 
 ## Cached Scoring
 
 For a fixed train/test/reference setup, compute exposure once with
-`evaluate_corpus()` or `audit_files()`, write segment JSONL, and reuse those
-artifacts for later system outputs.
+`evaluate_corpus()` or `audit_files()`, write a cache artifact, and reuse that
+artifact for later system outputs.
 
 ```python
-from tame_mt import read_segment_jsonl
+from tame_mt import load_cached_artifact
 from tame_mt.io import read_lines
 
-exposures, tm_results = read_segment_jsonl("segments.jsonl")
+refs = [read_lines("test.ref")]
+artifact = load_cached_artifact(
+    "segments.tamecache",
+    refs=refs,
+    config=scorer.config,
+)
 
-report = scorer.score_from_artifacts(
-    exposures=exposures,
-    tm_results=tm_results,
-    refs=[read_lines("test.ref")],
+report = scorer.score_from_cached_artifact(
+    artifact,
+    refs=refs,
     hyp=read_lines("system.out"),
-    num_train=125000,
 )
 ```
 
 This path does not inspect the training corpus or rebuild nearest-neighbor
-indexes.
+indexes. The loader reads the `.meta.json` sidecar, validates the scorer
+configuration, infers `num_train`, checks reference hashes, checks TM-hypothesis
+hashes, and rejects privacy-safe diagnostics that omit TM text.
 
 For many systems on the same cached diagnostics, score them together:
 
 ```python
-reports = scorer.score_many_from_artifacts(
-    exposures=exposures,
-    tm_results=tm_results,
+reports = scorer.score_many_from_cached_artifact(
+    artifact,
     refs=[read_lines("test.ref")],
     systems={
         "system_a": read_lines("system_a.out"),
         "system_b": read_lines("system_b.out"),
     },
-    num_train=125000,
 )
 
 system_a_report = reports["system_a"]
@@ -173,11 +199,9 @@ For services, notebooks, and leaderboards that receive hypotheses over time,
 prepare a cached scorer once and reuse it:
 
 ```python
-cached = scorer.prepare_from_artifacts(
-    exposures=exposures,
-    tm_results=tm_results,
+cached = scorer.prepare_from_cached_artifact(
+    artifact,
     refs=[read_lines("test.ref")],
-    num_train=125000,
 )
 
 system_a_report = cached.score(read_lines("system_a.out"), system_name="system_a")
@@ -197,59 +221,50 @@ change later `score()` or `score_many()` calls.
 
 Artifact indices are validated and canonicalized before scoring. They must be
 unique and contiguous from `0` to `N-1`; valid rows may be supplied out of order.
-Cached segment rows also carry their exposure-bin labels. `score_from_artifacts`
-and prepared cached scorers verify that each stored bin still matches the
-current `ScoreConfig.bins`; if you change `far_threshold` or `near_threshold`,
-rerun the audit or score cached artifacts with the original bin settings.
+Cached segment rows also carry their exposure-bin labels.
+`score_from_cached_artifact()` and prepared cached scorers verify that each
+stored bin still matches the current `ScoreConfig.bins`; if you change
+`far_threshold` or `near_threshold`, rerun the audit or score cached artifacts
+with the original bin settings.
 
-The CLI writes a `.meta.json` sidecar next to new segment JSONL outputs and
-validates it on cached CLI runs. Python callers can use the same helpers:
+The CLI writes a `.meta.json` sidecar next to new diagnostic/cache JSONL outputs
+and validates it on cached CLI runs. `load_cached_artifact()` uses the same
+rules.
+By default, missing metadata is a hard error. For trusted legacy artifacts only:
 
 ```python
-from tame_mt import read_segment_metadata, segment_metadata_path, validate_segment_metadata
-
-metadata = read_segment_metadata("segments.jsonl")
-if metadata is None:
-    raise RuntimeError("cached scoring requires segment metadata")
-
-validate_segment_metadata(
-    metadata,
-    config=config,
-    num_train=125000,
-    num_test=len(exposures),
-    num_refs=len(refs),
+legacy_artifact = load_cached_artifact(
+    "legacy_segments.jsonl",
     refs=refs,
-    tm_results=tm_results,
-    require_tm_text=True,
+    config=scorer.config,
+    num_train=125000,
+    allow_unsafe_no_metadata=True,
 )
-
-print(segment_metadata_path("segments.jsonl"))
 ```
 
 Metadata validation checks normalization, similarity, retrieval settings, TM
 zero policy, bin thresholds, reference content hashes, and TM hypothesis hashes.
-When metadata is available, pass its backend into cached scoring so generated
-reports preserve provenance:
+The artifact object stores the original backend metadata so generated reports
+preserve provenance:
 
 ```python
-artifact_backend = metadata["backend"]
-
-report = scorer.score_from_artifacts(
-    exposures=exposures,
-    tm_results=tm_results,
-    refs=refs,
+report = scorer.score_from_cached_artifact(
+    artifact,
+    refs=[read_lines("test.ref")],
     hyp=read_lines("system.out"),
-    num_train=125000,
-    artifact_backend=artifact_backend,
 )
 
 print(report.backend["artifact_backend"]["name"])
 ```
 
-Segment JSONL contains TM baseline hypotheses by default. If a segment artifact
-was written with `--no-tm-text-in-segments`, it is useful for private exposure
-diagnostics but cannot be used for cached scoring because TM-BLEU would be
-incorrect.
+The lower-level `read_segment_jsonl()`, `read_segment_metadata()`, and
+`validate_segment_metadata()` helpers remain public for advanced integrations,
+but new applications should prefer `load_cached_artifact()`.
+
+Cache artifacts contain TM baseline hypotheses. Diagnostic artifacts written by
+`--diagnostic-out` omit TM hypotheses by default; they are useful for private
+exposure diagnostics but cannot be used for cached scoring because TM-BLEU would
+be incorrect.
 
 ## Custom Configuration
 

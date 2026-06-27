@@ -22,7 +22,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "0.1"
+      "const": "1.0"
     },
     "tame_version": {
       "type": "string",
@@ -256,6 +256,9 @@
           "$ref": "#/$defs/nullableNumber"
         },
         "at_threshold": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "exact_at_threshold": {
           "$ref": "#/$defs/scoreMap"
         }
       }
