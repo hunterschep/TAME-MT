@@ -100,9 +100,11 @@ does not include raw source, reference, hypothesis, or training-neighbor text.
   "source_exact": false,
   "target_exposure": 0.7761,
   "target_nn_index": 42,
+  "target_ref_index": 0,
   "target_exact": false,
   "pair_exposure": 0.7761,
   "pair_nn_index": 42,
+  "pair_ref_index": 0,
   "pair_exact": false,
   "bin": "near",
   "tm_source_index": 42,
@@ -110,6 +112,12 @@ does not include raw source, reference, hypothesis, or training-neighbor text.
   "tm_hyp": "..."
 }
 ```
+
+For multi-reference inputs, `target_ref_index` is the zero-based reference file
+that produced `target_exposure`, and `pair_ref_index` is the zero-based
+reference file that produced `pair_exposure`. They are `null` when target or
+pair exposure is unavailable. Older cached segment JSONL files without these
+fields remain valid; missing values are read as `null`.
 
 Raw text fields are opt-in:
 

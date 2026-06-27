@@ -109,6 +109,8 @@ def _segment_exposure_from_payload(payload: dict[str, Any], line_number: int) ->
             pair_nn_index=_optional_int(payload.get("pair_nn_index")),
             pair_exact=_optional_bool(payload.get("pair_exact")),
             bin=_required_bin(payload["bin"]),
+            target_ref_index=_optional_int(payload.get("target_ref_index")),
+            pair_ref_index=_optional_int(payload.get("pair_ref_index")),
         )
     except KeyError as exc:
         raise InputDataError(f"segment JSONL line {line_number} is missing field {exc}") from exc

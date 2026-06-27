@@ -49,6 +49,9 @@ retrieving the closest training source and outputting its paired target.
 
 Pair exposure is computed by reranking the union of source and target top-k
 candidate training indices. Exact pair overlap is computed exactly.
+For multi-reference inputs, segment diagnostics record the reference index that
+produced the best target exposure and the reference index that produced the
+best pair exposure.
 
 The default translation-memory zero policy outputs an empty string when a test
 source shares no character n-grams with any training source. This avoids giving

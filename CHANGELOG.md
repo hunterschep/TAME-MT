@@ -50,6 +50,9 @@
   counts.
 - Hardened cached segment artifact scoring with strict index validation,
   canonical ordering, and safer JSON type parsing.
+- Added `target_ref_index` and `pair_ref_index` to segment diagnostics so
+  multi-reference audits show which reference produced the target and pair
+  exposure maxima; older cached JSONL files without those fields remain valid.
 - Hardened cached segment JSONL parsing so malformed bin labels and non-string
   TM hypotheses fail closed instead of being coerced.
 - Rejected non-finite numeric config and cached-artifact values and made JSON

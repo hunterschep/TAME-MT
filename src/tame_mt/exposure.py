@@ -99,7 +99,9 @@ def compute_exposure_result(
 
         ref_texts = [ref[idx] for ref in refs] if refs is not None else []
         target_tops = [tops_by_ref[idx] for tops_by_ref in target_tops_by_ref]
-        target_nn = _best_target_neighbor(target_tops) if target_index else None
+        target_nn, target_ref_index = (
+            _best_target_neighbor(target_tops) if target_index else (None, None)
+        )
         target_exact = _has_exact_neighbor(target_tops) if target_index is not None else None
         pair_exact = (
             any(
@@ -124,6 +126,23 @@ def compute_exposure_result(
             if target_index is not None and ref_texts
             else None
         )
+        pair_ref_index: int | None = None
+        if (
+            target_index is not None
+            and pair_nn is not None
+            and pair_nn.index is not None
+            and normalized_refs_by_ref
+        ):
+            pair_ref_index = (
+                0
+                if len(normalized_refs_by_ref) == 1
+                else _best_pair_ref_index(
+                    target_index=target_index,
+                    ref_texts=[ref[idx] for ref in normalized_refs_by_ref],
+                    candidate_index=pair_nn.index,
+                    pair_score=pair_nn.score,
+                )
+            )
 
         bin_name = assign_bin_values(source_exact, src_nn.score, config.bins)
         exposures.append(
@@ -139,6 +158,8 @@ def compute_exposure_result(
                 pair_nn_index=pair_nn.index if pair_nn else None,
                 pair_exact=pair_exact,
                 bin=bin_name,
+                target_ref_index=target_ref_index,
+                pair_ref_index=pair_ref_index,
             )
         )
     return ExposureComputation(segments=exposures, backend=source_index.backend_info)
@@ -226,19 +247,32 @@ def _percentile_sorted(sorted_values: list[float], percentile: float) -> float:
     return float(sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight)
 
 
-def _best_target_neighbor(target_tops: list[list[NeighborResult]]) -> NeighborResult | None:
+def _best_target_neighbor(
+    target_tops: list[list[NeighborResult]],
+) -> tuple[NeighborResult | None, int | None]:
     if not target_tops:
-        return None
+        return None, None
     best = NeighborResult(index=None, score=0.0, exact=False)
-    for top_results in target_tops:
+    best_ref_index: int | None = None
+    for ref_index, top_results in enumerate(target_tops):
         if not top_results:
             continue
         result = top_results[0]
         best_index = best.index if best.index is not None else 10**18
         result_index = result.index if result.index is not None else 10**18
-        if result.score > best.score or (result.score == best.score and result_index < best_index):
+        best_ref_tiebreak = best_ref_index if best_ref_index is not None else 10**18
+        if (
+            result.score > best.score
+            or (result.score == best.score and result_index < best_index)
+            or (
+                result.score == best.score
+                and result_index == best_index
+                and ref_index < best_ref_tiebreak
+            )
+        ):
             best = result
-    return best
+            best_ref_index = ref_index if result.index is not None else None
+    return best, best_ref_index
 
 
 def _has_exact_neighbor(target_tops: list[list[NeighborResult]]) -> bool:
@@ -282,6 +316,26 @@ def _compute_pair_neighbor(
         if pair_sim > best.score:
             best = NeighborResult(index=candidate, score=pair_sim, exact=pair_sim == 1.0)
     return best
+
+
+def _best_pair_ref_index(
+    target_index: NgramInvertedIndex,
+    ref_texts: list[str],
+    candidate_index: int,
+    pair_score: float,
+) -> int | None:
+    if not ref_texts:
+        return None
+    best_ref_index: int | None = None
+    best_target_score = -1.0
+    for ref_index, ref_text in enumerate(ref_texts):
+        target_score = target_index.score_candidate(ref_text, candidate_index)
+        if target_score + 1e-12 >= pair_score:
+            return ref_index
+        if target_score > best_target_score:
+            best_ref_index = ref_index
+            best_target_score = target_score
+    return best_ref_index
 
 
 def _batch_pair_neighbors(

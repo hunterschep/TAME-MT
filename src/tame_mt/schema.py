@@ -19,6 +19,8 @@ class SegmentExposure:
     pair_nn_index: int | None
     pair_exact: bool | None
     bin: str
+    target_ref_index: int | None = None
+    pair_ref_index: int | None = None
 
 
 @dataclass(slots=True)

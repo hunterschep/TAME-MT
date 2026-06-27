@@ -55,6 +55,21 @@ def test_pair_fields_are_absent_without_references() -> None:
     assert exposures[0].pair_exposure is None
 
 
+def test_multi_ref_exposure_records_best_reference_indices() -> None:
+    exposures = compute_exposure(
+        train_src=["shared source"],
+        train_tgt=["matching target"],
+        test_src=["shared source"],
+        refs=[["unrelated target"], ["matching target"]],
+        config=ScoreConfig(),
+    )
+
+    assert exposures[0].target_exposure == 1.0
+    assert exposures[0].target_ref_index == 1
+    assert exposures[0].pair_exposure == 1.0
+    assert exposures[0].pair_ref_index == 1
+
+
 def test_exposure_summary_uses_stable_percentile_and_threshold_semantics() -> None:
     exposures = [
         _segment(0, 0.0, False),

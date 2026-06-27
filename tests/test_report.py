@@ -80,6 +80,8 @@ def test_segment_jsonl_multi_ref_texts_are_explicit(tmp_path: Path) -> None:
     )
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["reference_texts"] == ["hola mundo", "saludos mundo"]
+    assert payload["target_ref_index"] == 0
+    assert payload["pair_ref_index"] == 0
 
 
 def test_segment_jsonl_supports_gzip(tmp_path: Path) -> None:

@@ -75,6 +75,29 @@ def test_read_segment_jsonl_parses_false_string_as_false(tmp_path: Path) -> None
     assert exposures[0].source_exact is False
 
 
+def test_read_segment_jsonl_parses_optional_reference_indices(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = _payload(0)
+    row["target_ref_index"] = 2
+    row["pair_ref_index"] = 1
+    _write_jsonl(path, [row])
+
+    exposures, _ = read_segment_jsonl(path)
+
+    assert exposures[0].target_ref_index == 2
+    assert exposures[0].pair_ref_index == 1
+
+
+def test_read_segment_jsonl_defaults_missing_reference_indices(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    _write_jsonl(path, [_payload(0)])
+
+    exposures, _ = read_segment_jsonl(path)
+
+    assert exposures[0].target_ref_index is None
+    assert exposures[0].pair_ref_index is None
+
+
 def test_read_segment_jsonl_rejects_non_bool_string(tmp_path: Path) -> None:
     path = tmp_path / "segments.jsonl"
     row = _payload(0)
