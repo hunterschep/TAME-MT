@@ -131,6 +131,30 @@ def test_score_many_from_artifacts_matches_single_system_reports() -> None:
     )
 
 
+def test_score_from_artifacts_records_artifact_backend_provenance() -> None:
+    report = TameScorer().score_from_artifacts(
+        exposures=[_segment(0, 1.0, "source_exact")],
+        tm_results=[
+            SegmentTMResult(index=0, tm_hyp="good", tm_source_index=0, tm_source_similarity=1.0)
+        ],
+        refs=[["good"]],
+        hyp=["good"],
+        num_train=1,
+        artifact_backend={
+            "name": "native_exact",
+            "native": True,
+            "exact": True,
+        },
+    )
+
+    assert report.backend["name"] == "cached_segments"
+    assert report.backend["artifact_backend"] == {
+        "name": "native_exact",
+        "native": True,
+        "exact": True,
+    }
+
+
 def test_prepare_from_artifacts_reuses_cached_setup_for_later_systems() -> None:
     exposures = [
         _segment(0, 1.0, "source_exact"),

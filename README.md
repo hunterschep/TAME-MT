@@ -94,7 +94,10 @@ tame-mt score \
 
 The `.tameidx` bundle stores compressed native source/target indexes plus the
 raw training text needed for TM outputs and optional segment reports. Treat it
-like the original training corpus for privacy and access control.
+like the original training corpus for privacy and access control. Bundle
+loading rejects unexpected ZIP members, duplicate names, unsafe declared sizes,
+excessive compression ratios, and unsupported native-index schema versions
+before deserializing native bytes.
 
 If the train/test/reference setup is fixed and only hypotheses change, cache
 the train-aware diagnostics once and reuse them:
@@ -131,7 +134,10 @@ the cached segment diagnostics once and computes the TM baseline once for the
 whole batch. New segment JSONL outputs are accompanied by a
 `segments.jsonl.meta.json` sidecar, and cached CLI commands validate it when
 present so changed normalization, retrieval, TM-zero, count, or bin settings do
-not silently produce a mixed-configuration report.
+not silently produce a mixed-configuration report. Cached JSON reports also
+preserve the backend that produced the original segment artifact under
+`backend.artifact_backend`, so downstream dashboards can tell whether cached
+diagnostics came from `native_exact`, `native_fast`, or another retrieval mode.
 
 Python services and notebooks can go one step further with
 `TameScorer.prepare_from_artifacts()`: validate the cached diagnostics once,
@@ -584,12 +590,14 @@ as `18.40%`.
 Every report includes a deterministic signature, for example:
 
 ```text
-tame-mt|v:0.1.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|idx:auto|backend:native_fast|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2
+tame-mt|v:0.1.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|idx:auto|backend:native_fast|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
 ```
 
 The signature records the TAME-MT version, normalization, similarity function,
 requested index mode, resolved backend, TM zero policy, bin thresholds, pair
-reranking top-k, selected metrics, and SacreBLEU settings.
+reranking top-k, selected metrics, SacreBLEU settings, and dependency versions
+that can affect metric scores. JSON reports also include these dependency
+versions under `config.dependencies`.
 
 ## Performance Modes
 
@@ -676,6 +684,10 @@ Index bundles created by `tame-mt index build` store raw training source/target
 lines and normalized exact-match and pair keys so later runs can produce
 identical TM outputs and optional neighbor-text diagnostics. Do not publish
 `.tameidx` files unless the underlying training corpus can also be published.
+Treat `.tameidx` files from unknown sources as untrusted inputs. The loader
+enforces size and compression-ratio limits and validates the archive shape
+before native deserialization, but the safest workflow is still to rebuild
+bundles from trusted `train.src`/`train.tgt` files.
 
 ## Limitations
 
@@ -700,9 +712,15 @@ mypy src/tame_mt
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
+python benchmarks/validate_fast_recall.py --require-native
 python -m build
 python -m twine check dist/*
 ```
+
+For release work, run `scripts/acceptance.sh` locally and see
+[`docs/release.md`](docs/release.md). Tagged releases are built by GitHub
+Actions, checked with `twine`, audited, attested, accompanied by an SBOM
+artifact, and published through PyPI trusted publishing.
 
 ## Citation
 

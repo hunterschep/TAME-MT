@@ -1,4 +1,5 @@
 import json
+import random
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,7 @@ def _metadata(config: ScoreConfig | None = None) -> dict[str, object]:
     return {
         "schema_version": "0.1",
         "artifact": "segment_jsonl",
+        "signature": "tame-mt|test",
         "data": {"num_train": 4, "num_test": 1, "num_refs": 1},
         "config": config_to_dict(config or ScoreConfig()),
         "backend": {"name": "native_exact"},
@@ -72,6 +74,30 @@ def test_read_segment_jsonl_sorts_valid_reordered_rows(tmp_path: Path) -> None:
 
     assert [segment.index for segment in exposures] == [0, 1]
     assert [result.tm_hyp for result in tm_results] == ["tm 0", "tm 1"]
+
+
+def test_read_segment_jsonl_accepts_seeded_fuzzed_scalar_encodings(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    rng = random.Random(17)
+    rows = []
+    for index in range(25):
+        row = _payload(index)
+        row["index"] = str(index) if index % 2 else index
+        row["source_exposure"] = "1.0" if index == 0 else f"0.{index % 9 + 1}"
+        row["source_exact"] = "true" if index == 0 else "false"
+        row["target_exposure"] = None if index % 3 else 0
+        row["target_exact"] = None if index % 3 else 0
+        row["tm_source_similarity"] = str(row["source_exposure"])
+        rows.append(row)
+    rng.shuffle(rows)
+    _write_jsonl(path, rows)
+
+    exposures, tm_results = read_segment_jsonl(path)
+
+    assert [segment.index for segment in exposures] == list(range(25))
+    assert [result.index for result in tm_results] == list(range(25))
+    assert exposures[0].source_exact is True
+    assert exposures[-1].source_exact is False
 
 
 def test_read_segment_jsonl_rejects_duplicate_indices(tmp_path: Path) -> None:
@@ -240,6 +266,34 @@ def test_validate_segment_metadata_rejects_schema_mismatch() -> None:
     metadata["schema_version"] = "9"
 
     with pytest.raises(InputDataError, match="schema_version"):
+        validate_segment_metadata(
+            metadata,
+            config=ScoreConfig(),
+            num_train=4,
+            num_test=1,
+            num_refs=1,
+        )
+
+
+def test_validate_segment_metadata_rejects_missing_backend() -> None:
+    metadata = _metadata()
+    metadata.pop("backend")
+
+    with pytest.raises(InputDataError, match="backend"):
+        validate_segment_metadata(
+            metadata,
+            config=ScoreConfig(),
+            num_train=4,
+            num_test=1,
+            num_refs=1,
+        )
+
+
+def test_validate_segment_metadata_rejects_missing_signature() -> None:
+    metadata = _metadata()
+    metadata.pop("signature")
+
+    with pytest.raises(InputDataError, match="signature"):
         validate_segment_metadata(
             metadata,
             config=ScoreConfig(),

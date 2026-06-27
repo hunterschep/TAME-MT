@@ -22,6 +22,13 @@ query n-grams, read bounded postings, keep a bounded candidate set, and rerank
 that shortlist with exact Jaccard similarity. Exact source, target, and pair
 overlap rates remain exact.
 
+Release acceptance includes `benchmarks/validate_fast_recall.py`, which compares
+fast retrieval with exact retrieval on deterministic domain-template,
+multilingual, and lexical-family corpora. The guard requires exact-match recall
+of 1.0 and enforces top-1 agreement and score-gap ceilings. This is not a proof
+that every corpus is recall-safe; it is a regression test that the approximate
+path stays characterized instead of drifting silently.
+
 ## Recommended Workflow
 
 There are two reuse levels.
@@ -114,10 +121,12 @@ statistics once per metric and output, then reuses those statistics for the
 whole corpus and all exposure bins without copying the full segment-stat list
 again. Ordered cached segment artifacts also take a fast validation path before
 scoring, while malformed or reordered artifacts still go through the full
-duplicate/missing-index validator. If a future SacreBLEU release changes those
-internal segment-stat APIs, TAME-MT falls back to SacreBLEU's public corpus
-scoring APIs so scoring remains correct, with reduced bin-scoring performance
-until the optimized adapter is updated.
+duplicate/missing-index validator. TAME-MT pins the supported SacreBLEU major
+range to `sacrebleu>=2.4,<3` and CI tests both the minimum supported 2.x line
+and the current 2.x line. If a forced install removes the internal segment-stat
+hooks anyway, TAME-MT falls back to SacreBLEU's public corpus scoring APIs so
+scoring remains correct, with reduced bin-scoring performance until the
+optimized adapter is updated.
 
 Fresh and indexed audits also avoid avoidable Python work around retrieval:
 native query candidate maps use the same lightweight FNV hashing strategy as

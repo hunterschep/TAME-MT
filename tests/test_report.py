@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import sacrebleu
 
 from tame_mt import TameScorer
 from tame_mt.artifacts import read_segment_jsonl
@@ -20,6 +21,8 @@ def test_report_to_json_contains_schema_version() -> None:
     payload = json.loads(report.to_json())
     assert payload["schema_version"] == "0.1"
     assert payload["signature"].startswith("tame-mt|v:0.1.0|")
+    assert f"|deps:sacrebleu_{sacrebleu.__version__}" in payload["signature"]
+    assert payload["config"]["dependencies"]["sacrebleu"] == sacrebleu.__version__
     assert payload["backend"]["name"] in {
         "native_exact",
         "python_exact",

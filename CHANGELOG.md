@@ -39,6 +39,13 @@
 - Hardened `.tameidx` loading with strict manifest types, duplicate-member
   rejection, and manifest-vs-ZIP member size checks before native index
   deserialization.
+- Hardened `.tameidx` loading further with unexpected-member rejection,
+  member-specific hard caps, total uncompressed-size limits, compression-ratio
+  checks, and streaming UTF-8 training-text reads before native index
+  deserialization.
+- Made `.tameidx` writes atomic by writing a temporary bundle in the destination
+  directory and replacing the output path only after the archive closes
+  successfully.
 - Optimized native index reuse by avoiding duplicate Python exact maps and by
   persisting normalized exact-pair keys for faster repeated audits.
 - Reduced native query-loop overhead by using the package's lightweight FNV
@@ -58,6 +65,12 @@
 - Added automatic segment JSONL metadata sidecars and cached-CLI validation for
   artifact-defining config and count drift while preserving legacy sidecar-free
   segment JSONL compatibility.
+- Preserved the original segment-artifact backend in cached JSON reports via
+  `backend.artifact_backend` when metadata sidecars are available.
+- Added SacreBLEU runtime versions to report signatures and JSON config
+  metadata so metric-affecting dependency changes are visible and reproducible.
+- Bounded the supported SacreBLEU dependency range to `sacrebleu>=2.4,<3` and
+  added CI compatibility tests for supported 2.x ranges.
 - Exposed segment metadata path/read/validation helpers in the public Python
   namespace so services can enforce the same cached-artifact checks as the CLI.
 - Extended the built-wheel smoke test to require the native backend up front
@@ -123,6 +136,9 @@
   per-system latency checks.
 - Added the staged synthetic benchmark to CI so indexed, cached, prepared
   cached, and batch cached performance regressions are caught before merge.
+- Added `benchmarks/validate_fast_recall.py` and CI/acceptance coverage for
+  deterministic fast-vs-exact retrieval recall, agreement, and score-gap
+  characterization.
 - Made staged benchmark indexed timings include persisted `.tameidx` load time.
 - Tightened release acceptance performance checks to cover the 100k staged
   benchmark path with explicit build, indexed-audit, and cached-score
@@ -136,6 +152,11 @@
   smoke fixtures or the smoke script change.
 - Extended wheel smoke coverage to exercise the public prepared cached-scoring
   API from the installed package.
+- Added deterministic fuzz-style parser tests for segment JSONL scalar
+  encodings, native/Python retrieval parity tests, and a SacreBLEU segment-stat
+  acceleration sentinel.
+- Added release CI for dependency audits, tag-driven trusted PyPI publishing,
+  build provenance attestation, and SPDX SBOM artifact generation.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.

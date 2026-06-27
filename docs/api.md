@@ -198,6 +198,24 @@ if metadata is not None:
 print(segment_metadata_path("segments.jsonl"))
 ```
 
+When metadata is available, pass its backend into cached scoring so generated
+reports preserve provenance:
+
+```python
+artifact_backend = metadata["backend"] if metadata is not None else None
+
+report = scorer.score_from_artifacts(
+    exposures=exposures,
+    tm_results=tm_results,
+    refs=refs,
+    hyp=read_lines("system.out"),
+    num_train=125000,
+    artifact_backend=artifact_backend,
+)
+
+print(report.backend["artifact_backend"]["name"])
+```
+
 ## Custom Configuration
 
 ```python
@@ -212,8 +230,8 @@ config = ScoreConfig(
 )
 ```
 
-Metric-changing configuration and the resolved retrieval backend are recorded in
-the report signature.
+Metric-changing configuration, the resolved retrieval backend, and
+metric-affecting dependency versions are recorded in the report signature.
 
 Configuration dataclasses validate both structure and scalar values at
 construction time. Integer settings reject booleans and floats, boolean flags

@@ -13,6 +13,7 @@ pytest
 
 python benchmarks/bench_synthetic.py --small --assert-thresholds
 python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
+python benchmarks/validate_fast_recall.py --require-native
 python benchmarks/bench_synthetic.py \
   --train-size 100000 \
   --test-size 2000 \

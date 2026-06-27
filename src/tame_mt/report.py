@@ -4,6 +4,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+import sacrebleu
+
 from tame_mt.config import ScoreConfig
 from tame_mt.exceptions import OutputError
 from tame_mt.io import ensure_parent_dir, open_text
@@ -20,6 +22,7 @@ def build_signature(config: ScoreConfig, backend_name: str | None = None) -> str
     leaks = ",".join(f"{threshold:.2f}" for threshold in config.bins.leak_thresholds)
     metrics = ",".join(metric.lower() for metric in config.metrics)
     backend = backend_name or config.index.mode
+    sacrebleu_version = dependency_versions()["sacrebleu"]
     return (
         f"tame-mt|v:{__version__}|norm:{norm}|sim:char_jaccard_{orders}_set|"
         f"idx:{config.index.mode}|backend:{backend}|tm:src_nn_top1_zero_{config.tm.zero_policy}|"
@@ -28,8 +31,12 @@ def build_signature(config: ScoreConfig, backend_name: str | None = None) -> str
         f"{config.index.posting_limit},{config.index.max_candidates},"
         f"{config.index.rerank_limit}|metrics:{metrics}|"
         f"sacrebleu:bleu_tok_{config.metric.bleu_tokenize}_lc_{int(config.metric.bleu_lowercase)}_"
-        f"chrf_wo_{config.metric.chrf_word_order}"
+        f"chrf_wo_{config.metric.chrf_word_order}|deps:sacrebleu_{sacrebleu_version}"
     )
+
+
+def dependency_versions() -> dict[str, str]:
+    return {"sacrebleu": str(sacrebleu.__version__)}
 
 
 def config_to_dict(config: ScoreConfig) -> dict[str, Any]:
@@ -50,6 +57,7 @@ def config_to_dict(config: ScoreConfig) -> dict[str, Any]:
         "tm": asdict(config.tm),
         "metrics": list(config.metrics),
         "sacrebleu": asdict(config.metric),
+        "dependencies": dependency_versions(),
     }
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import tempfile
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -29,6 +31,11 @@ ZIP_COMPRESSION = zipfile.ZIP_DEFLATED
 ZIP_COMPRESSION_NAME = "deflated"
 ZIP_COMPRESSLEVEL = 1
 MAX_MANIFEST_BYTES = 1_000_000
+MAX_TRAIN_TEXT_MEMBER_BYTES = 4 * 1024 * 1024 * 1024
+MAX_NATIVE_INDEX_BYTES = 8 * 1024 * 1024 * 1024
+MAX_EXACT_PAIR_KEYS_BYTES = 8 * 1024 * 1024 * 1024
+MAX_TOTAL_UNCOMPRESSED_BYTES = 24 * 1024 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 500.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,24 +103,33 @@ def save_index_bundle(
     )
     output_path = Path(path)
     ensure_parent_dir(output_path)
-    with zipfile.ZipFile(
-        output_path,
-        mode="w",
-        compression=ZIP_COMPRESSION,
-        compresslevel=ZIP_COMPRESSLEVEL,
-    ) as archive:
-        archive.writestr(
-            MANIFEST_NAME,
-            strict_json_dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        )
-        archive.writestr(TRAIN_SRC_NAME, _encode_lines(train_src))
-        if train_tgt is not None:
-            archive.writestr(TRAIN_TGT_NAME, _encode_lines(train_tgt))
-        archive.writestr(SOURCE_INDEX_NAME, source_index_bytes)
-        if target_index_bytes is not None:
-            archive.writestr(TARGET_INDEX_NAME, target_index_bytes)
-        if exact_pair_keys_bytes is not None:
-            archive.writestr(EXACT_PAIR_KEYS_NAME, exact_pair_keys_bytes)
+    source_index.release_python_normalized_lines()
+    if target_index is not None:
+        target_index.release_python_normalized_lines()
+    tmp_path = _temporary_bundle_path(output_path)
+    try:
+        with zipfile.ZipFile(
+            tmp_path,
+            mode="w",
+            compression=ZIP_COMPRESSION,
+            compresslevel=ZIP_COMPRESSLEVEL,
+        ) as archive:
+            archive.writestr(
+                MANIFEST_NAME,
+                strict_json_dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            )
+            archive.writestr(TRAIN_SRC_NAME, _encode_lines(train_src))
+            if train_tgt is not None:
+                archive.writestr(TRAIN_TGT_NAME, _encode_lines(train_tgt))
+            archive.writestr(SOURCE_INDEX_NAME, source_index_bytes)
+            if target_index_bytes is not None:
+                archive.writestr(TARGET_INDEX_NAME, target_index_bytes)
+            if exact_pair_keys_bytes is not None:
+                archive.writestr(EXACT_PAIR_KEYS_NAME, exact_pair_keys_bytes)
+        tmp_path.replace(output_path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
     return IndexBundle(
         train_src=train_src,
@@ -312,26 +328,30 @@ def _validate_archive_members(archive: zipfile.ZipFile, manifest: dict[str, Any]
     storage = _storage_manifest(manifest)
     has_target = _manifest_bool(manifest, "has_target")
 
-    _archive_member_info(archive, TRAIN_SRC_NAME)
+    _validate_archive_shape(archive, has_target=has_target)
+    _validate_text_member(archive, TRAIN_SRC_NAME)
     _validate_member_size(
         archive,
         SOURCE_INDEX_NAME,
         _positive_storage_int(storage, "source_index_bytes"),
+        max_size=MAX_NATIVE_INDEX_BYTES,
     )
 
     target_index_bytes = _storage_int(storage, "target_index_bytes")
     exact_pair_keys_bytes = _storage_int(storage, "exact_pair_keys_bytes")
     if has_target:
-        _archive_member_info(archive, TRAIN_TGT_NAME)
+        _validate_text_member(archive, TRAIN_TGT_NAME)
         _validate_member_size(
             archive,
             TARGET_INDEX_NAME,
             _positive_storage_int(storage, "target_index_bytes"),
+            max_size=MAX_NATIVE_INDEX_BYTES,
         )
         _validate_member_size(
             archive,
             EXACT_PAIR_KEYS_NAME,
             _positive_storage_int(storage, "exact_pair_keys_bytes"),
+            max_size=MAX_EXACT_PAIR_KEYS_BYTES,
         )
     elif target_index_bytes != 0 or exact_pair_keys_bytes != 0:
         raise ConfigurationError(
@@ -426,21 +446,73 @@ def _archive_member_info(archive: zipfile.ZipFile, name: str) -> zipfile.ZipInfo
     return matches[0]
 
 
+def _validate_archive_shape(archive: zipfile.ZipFile, *, has_target: bool) -> None:
+    expected = {
+        MANIFEST_NAME,
+        TRAIN_SRC_NAME,
+        SOURCE_INDEX_NAME,
+    }
+    if has_target:
+        expected.update({TRAIN_TGT_NAME, TARGET_INDEX_NAME, EXACT_PAIR_KEYS_NAME})
+    names = [item.filename for item in archive.infolist()]
+    unexpected = sorted(set(names) - expected)
+    if unexpected:
+        raise ConfigurationError(f"index bundle has unexpected member {unexpected[0]}")
+    total_size = sum(item.file_size for item in archive.infolist())
+    if total_size > MAX_TOTAL_UNCOMPRESSED_BYTES:
+        raise ConfigurationError(
+            "index bundle uncompressed size exceeds maximum: "
+            f"{total_size} > {MAX_TOTAL_UNCOMPRESSED_BYTES}"
+        )
+
+
 def _has_archive_member(archive: zipfile.ZipFile, name: str) -> bool:
     return any(item.filename == name for item in archive.infolist())
+
+
+def _validate_text_member(archive: zipfile.ZipFile, name: str) -> None:
+    _validate_member_safety(
+        _archive_member_info(archive, name),
+        max_size=MAX_TRAIN_TEXT_MEMBER_BYTES,
+    )
 
 
 def _validate_member_size(
     archive: zipfile.ZipFile,
     name: str,
     expected_size: int,
+    *,
+    max_size: int,
 ) -> None:
-    actual_size = _archive_member_info(archive, name).file_size
+    if expected_size > max_size:
+        raise ConfigurationError(
+            f"index bundle member {name} declared size exceeds maximum: "
+            f"{expected_size} > {max_size}"
+        )
+    member = _archive_member_info(archive, name)
+    _validate_member_safety(member, max_size=max_size)
+    actual_size = member.file_size
     if actual_size != expected_size:
         raise ConfigurationError(
             f"index bundle member {name} size {actual_size} does not match "
             f"manifest value {expected_size}"
         )
+
+
+def _validate_member_safety(member: zipfile.ZipInfo, *, max_size: int) -> None:
+    if member.file_size > max_size:
+        raise ConfigurationError(
+            f"index bundle member {member.filename} is too large: {member.file_size} > {max_size}"
+        )
+    if member.file_size and member.compress_size == 0:
+        raise ConfigurationError(f"index bundle member {member.filename} has invalid compression")
+    if member.compress_size:
+        ratio = member.file_size / member.compress_size
+        if ratio > MAX_ZIP_COMPRESSION_RATIO:
+            raise ConfigurationError(
+                f"index bundle member {member.filename} compression ratio is too high: "
+                f"{ratio:.1f} > {MAX_ZIP_COMPRESSION_RATIO:.1f}"
+            )
 
 
 def _read_member_bytes(
@@ -454,22 +526,41 @@ def _read_member_bytes(
         raise ConfigurationError(
             f"index bundle member {name} is too large: {member.file_size} > {max_size}"
         )
+    _validate_member_safety(member, max_size=max_size or MAX_TOTAL_UNCOMPRESSED_BYTES)
     return archive.read(member)
 
 
 def _read_lines_member(archive: zipfile.ZipFile, name: str) -> list[str]:
-    return _decode_lines(_read_member_bytes(archive, name), name)
+    member = _archive_member_info(archive, name)
+    _validate_member_safety(member, max_size=MAX_TRAIN_TEXT_MEMBER_BYTES)
+    try:
+        with (
+            archive.open(member, "r") as raw_handle,
+            io.TextIOWrapper(
+                raw_handle,
+                encoding="utf-8",
+            ) as text_handle,
+        ):
+            return [line.rstrip("\n\r") for line in text_handle]
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError(f"index bundle member {name} is not valid UTF-8") from exc
 
 
 def _read_bytes_member(archive: zipfile.ZipFile, name: str) -> bytes:
-    return _read_member_bytes(archive, name)
+    return _read_member_bytes(archive, name, max_size=MAX_NATIVE_INDEX_BYTES)
 
 
 def _read_exact_pair_keys_member(archive: zipfile.ZipFile) -> set[str] | None:
     if not _has_archive_member(archive, EXACT_PAIR_KEYS_NAME):
         return None
     try:
-        return _decode_exact_pair_keys(_read_member_bytes(archive, EXACT_PAIR_KEYS_NAME))
+        return _decode_exact_pair_keys(
+            _read_member_bytes(
+                archive,
+                EXACT_PAIR_KEYS_NAME,
+                max_size=MAX_EXACT_PAIR_KEYS_BYTES,
+            )
+        )
     except UnicodeDecodeError as exc:
         raise ConfigurationError("index bundle exact-pair key member is not valid UTF-8") from exc
 
@@ -491,13 +582,6 @@ def _require_native_index(index: NgramInvertedIndex, label: str) -> None:
 
 def _encode_lines(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def _decode_lines(payload: bytes, member_name: str) -> list[str]:
-    try:
-        return payload.decode("utf-8").splitlines()
-    except UnicodeDecodeError as exc:
-        raise ConfigurationError(f"index bundle member {member_name} is not valid UTF-8") from exc
 
 
 def _encode_exact_pair_keys(keys: set[str]) -> bytes:
@@ -528,3 +612,14 @@ def _decode_exact_pair_keys(payload: bytes) -> set[str]:
 
 def _jsonable(value: Any) -> Any:
     return strict_json_loads(strict_json_dumps(value, ensure_ascii=False))
+
+
+def _temporary_bundle_path(output_path: Path) -> Path:
+    parent = output_path.parent if output_path.parent != Path("") else Path(".")
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{output_path.name}.",
+        suffix=".tmp",
+        dir=parent,
+        delete=False,
+    ) as handle:
+        return Path(handle.name)

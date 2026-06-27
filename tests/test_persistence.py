@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import tame_mt.persistence as persistence
 from tame_mt.api import TameScorer
 from tame_mt.config import IndexConfig, ScoreConfig
 from tame_mt.exceptions import ConfigurationError
@@ -31,6 +32,9 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     manifest = inspect_index_bundle(path)
 
     assert saved.source_index.query_topk("abcdeg", 2) == loaded.source_index.query_topk("abcdeg", 2)
+    assert saved.source_index.normalized_lines == []
+    assert saved.target_index is not None
+    assert saved.target_index.normalized_lines == []
     assert loaded.train_src == train_src
     assert loaded.train_tgt == train_tgt
     assert loaded.source_index.normalized_lines == []
@@ -188,6 +192,83 @@ def test_load_index_bundle_rejects_manifest_member_size_mismatch(tmp_path: Path)
         load_index_bundle(bad_path, config)
 
 
+def test_load_index_bundle_rejects_unexpected_archive_member(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    _copy_bundle_with_extra_member(path, bad_path, "surprise.bin", b"not part of the format")
+
+    with pytest.raises(ConfigurationError, match="unexpected member surprise.bin"):
+        load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_declared_member_size_above_cap(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    _copy_bundle_with_manifest_override(
+        path,
+        bad_path,
+        {
+            "storage": {
+                "source_index_bytes": persistence.MAX_NATIVE_INDEX_BYTES + 1,
+            }
+        },
+    )
+
+    with pytest.raises(ConfigurationError, match="declared size exceeds maximum"):
+        load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_excessive_zip_compression_ratio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    monkeypatch.setattr(persistence, "MAX_ZIP_COMPRESSION_RATIO", 1.0)
+
+    with pytest.raises(ConfigurationError, match="compression ratio is too high"):
+        load_index_bundle(path, config)
+
+
+def test_save_index_bundle_is_atomic_when_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    path.write_bytes(b"old bundle bytes")
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+
+    def fail_writestr(
+        self: zipfile.ZipFile,
+        zinfo_or_arcname: str | zipfile.ZipInfo,
+        data: str | bytes,
+        compress_type: int | None = None,
+        compresslevel: int | None = None,
+    ) -> None:
+        _ = self, zinfo_or_arcname, data, compress_type, compresslevel
+        raise RuntimeError("simulated write failure")
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", fail_writestr)
+
+    with pytest.raises(RuntimeError, match="simulated write failure"):
+        save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    assert path.read_bytes() == b"old bundle bytes"
+    assert not list(tmp_path.glob(f".{path.name}.*.tmp"))
+
+
 def test_load_index_bundle_rejects_unsupported_format_version(tmp_path: Path) -> None:
     pytest.importorskip("tame_mt._native")
     path = tmp_path / "train.tameidx"
@@ -235,6 +316,18 @@ def _copy_bundle_with_manifest_override(
                 target.writestr(item, json.dumps(manifest))
             else:
                 target.writestr(item, source.read(item.filename))
+
+
+def _copy_bundle_with_extra_member(
+    source_path: Path,
+    target_path: Path,
+    member_name: str,
+    payload: bytes,
+) -> None:
+    with zipfile.ZipFile(source_path, "r") as source, zipfile.ZipFile(target_path, "w") as target:
+        for item in source.infolist():
+            target.writestr(item, source.read(item.filename))
+        target.writestr(member_name, payload)
 
 
 def _merge_manifest_overrides(

@@ -278,6 +278,7 @@ def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
     cached = json.loads(cached_json.read_text(encoding="utf-8"))
     assert cached["quality"] == full["quality"]
     assert cached["exposure"] == full["exposure"]
+    assert cached["backend"]["artifact_backend"] == full["backend"]
 
 
 def test_cli_score_cached_rejects_bin_threshold_mismatch(
@@ -418,7 +419,8 @@ def test_cli_score_cached_accepts_legacy_segments_without_metadata(tmp_path: Pat
 
     assert full_rc == 0
     assert cached_rc == 0
-    assert cached_json.exists()
+    cached = json.loads(cached_json.read_text(encoding="utf-8"))
+    assert "artifact_backend" not in cached["backend"]
 
 
 def test_cli_score_cached_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
@@ -516,6 +518,7 @@ def test_cli_score_cached_batch_writes_per_system_reports(tmp_path: Path) -> Non
     baseline = json.loads((output_dir / "baseline.json").read_text(encoding="utf-8"))
     variant = json.loads((output_dir / "variant.json").read_text(encoding="utf-8"))
     assert baseline["backend"]["resolved_mode"] == "cached_segments"
+    assert baseline["backend"]["artifact_backend"] == variant["backend"]["artifact_backend"]
     assert baseline["quality"]["tm"] == variant["quality"]["tm"]
     assert baseline["quality"]["system"] != variant["quality"]["system"]
 

@@ -74,6 +74,10 @@ def validate_segment_metadata(
         )
     if metadata.get("artifact") != "segment_jsonl":
         raise InputDataError("segment metadata artifact must be 'segment_jsonl'")
+    signature = metadata.get("signature")
+    if not isinstance(signature, str) or not signature:
+        raise InputDataError("segment metadata signature must be a non-empty string")
+    _metadata_object(metadata, "backend")
     data = _metadata_object(metadata, "data")
     _require_metadata_int(data, "num_train", num_train)
     _require_metadata_int(data, "num_test", num_test)

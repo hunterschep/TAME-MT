@@ -50,6 +50,17 @@ def test_multi_system_grouped_scores_reuse_same_semantics() -> None:
     assert grouped["missing"]["all"] == {"bleu": None, "chrf": None}
 
 
+def test_supported_sacrebleu_version_exposes_segment_stats_acceleration() -> None:
+    scorer = sacre.PreparedSacreMetricGroupScorer(
+        "bleu",
+        refs=[["hello world", "good morning"]],
+        groups={"all": [0, 1]},
+        config=ScoreConfig().metric,
+    )
+
+    assert scorer._use_segment_stats is True
+
+
 def test_grouped_scores_fall_back_when_sacrebleu_stats_api_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

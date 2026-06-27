@@ -57,6 +57,32 @@ def test_fast_index_preserves_exact_match_shortcut() -> None:
     assert result.exact is True
 
 
+def test_fast_index_matches_exact_when_limits_cover_candidate_space() -> None:
+    lines = [
+        f"domain {idx % 5} source sentence {idx:03d} topic {idx % 7} shared tail"
+        for idx in range(40)
+    ]
+    queries = [
+        lines[0],
+        "domain 2 source sentence 017 topic 3 shared tile",
+        "domain 4 heldout source sentence topic shared tail",
+    ]
+    exact = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="python_exact"))
+    fast = NgramInvertedIndex.build(
+        lines,
+        index_config=IndexConfig(
+            mode="python_fast",
+            candidate_gram_limit=1_000,
+            posting_limit=1_000,
+            max_candidates=1_000,
+            rerank_limit=1_000,
+        ),
+    )
+
+    for query in queries:
+        assert fast.query_topk(query, 5) == exact.query_topk(query, 5)
+
+
 def test_native_exact_matches_python_exact_when_available() -> None:
     pytest.importorskip("tame_mt._native")
     lines = ["abcdef", "uvwxyz", "abcxyz", "नमस्ते दुनिया"]
@@ -72,6 +98,32 @@ def test_native_exact_matches_python_exact_when_available() -> None:
     assert native_index.score_candidates(query, [0, 1, 2, 3]) == python_index.score_candidates(
         query, [0, 1, 2, 3]
     )
+
+
+def test_native_exact_matches_python_exact_on_seeded_unicode_corpus() -> None:
+    pytest.importorskip("tame_mt._native")
+    lines = [
+        "alpha beta gamma",
+        "alpha beta delta",
+        "mañana será otro día",
+        "mañana sera otro dia",
+        "測試 句子 甲",
+        "測試 句子 乙",
+        "नमस्ते दुनिया",
+        "नमस्ते संसार",
+    ]
+    queries = [
+        "alpha beta gamma",
+        "alpha beta epsilon",
+        "mañana será un día distinto",
+        "測試 句子 丙",
+        "नमस्ते दुनिया",
+    ]
+    python_index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="python_exact"))
+    native_index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="native_exact"))
+
+    for query in queries:
+        assert native_index.query_topk(query, 4) == python_index.query_topk(query, 4)
 
 
 def test_native_index_can_release_python_normalized_lines_when_available() -> None:

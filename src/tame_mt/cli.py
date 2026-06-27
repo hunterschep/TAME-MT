@@ -371,6 +371,7 @@ def run_score_cached(args: argparse.Namespace) -> int:
                 num_test=len(exposures),
                 num_refs=len(refs),
             )
+        artifact_backend = _artifact_backend_from_metadata(metadata)
     scorer = TameScorer(config)
     with _timed_step(args, "score cached hypothesis"):
         report = scorer.score_from_artifacts(
@@ -379,6 +380,7 @@ def run_score_cached(args: argparse.Namespace) -> int:
             refs=refs,
             hyp=hyp,
             num_train=args.num_train,
+            artifact_backend=artifact_backend,
         )
     with _timed_step(args, "write outputs"):
         if args.json_out:
@@ -404,6 +406,7 @@ def run_score_cached_batch(args: argparse.Namespace) -> int:
                 num_test=len(exposures),
                 num_refs=len(refs),
             )
+        artifact_backend = _artifact_backend_from_metadata(metadata)
     scorer = TameScorer(config)
     with _timed_step(args, "score cached systems"):
         reports = scorer.score_many_from_artifacts(
@@ -412,6 +415,7 @@ def run_score_cached_batch(args: argparse.Namespace) -> int:
             refs=refs,
             systems=systems,
             num_train=args.num_train,
+            artifact_backend=artifact_backend,
         )
     with _timed_step(args, "write outputs"):
         output_paths = _write_batch_reports(args.json_out_dir, reports)
@@ -679,6 +683,15 @@ def _required_arg(args: argparse.Namespace, attr: str, flag: str) -> str:
 def _validate_num_train_arg(num_train: int) -> None:
     if num_train <= 0:
         raise TameMTError("num_train must be positive")
+
+
+def _artifact_backend_from_metadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+    if metadata is None:
+        return None
+    backend = metadata.get("backend")
+    if isinstance(backend, dict):
+        return dict(backend)
+    return None
 
 
 def _parse_metrics(values: list[str]) -> tuple[str, ...]:

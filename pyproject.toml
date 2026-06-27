@@ -32,7 +32,7 @@ classifiers = [
   "Topic :: Text Processing :: Linguistic",
 ]
 dependencies = [
-  "sacrebleu>=2.0",
+  "sacrebleu>=2.4,<3",
 ]
 
 [project.urls]
@@ -45,6 +45,7 @@ dev = [
   "build>=1.0",
   "maturin>=1.7,<2",
   "mypy>=1.8",
+  "pip-audit>=2.7",
   "pytest>=7.0",
   "ruff>=0.5",
   "twine>=5.0",

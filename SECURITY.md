@@ -24,3 +24,26 @@ The following flags can write raw text and should be used only when appropriate:
 ```
 
 `--include-neighbor-text` can write raw training text.
+
+## Untrusted Artifacts
+
+Treat `.tameidx`, segment JSONL, and segment metadata files from unknown sources
+as untrusted inputs. Prefer rebuilding index bundles from trusted training text.
+
+TAME-MT validates `.tameidx` archives before native deserialization:
+
+- unexpected or duplicate ZIP members are rejected;
+- manifest-declared native member sizes must match the ZIP entries;
+- native index, exact-key, training-text, manifest, and total uncompressed sizes
+  have hard caps;
+- suspicious compression ratios are rejected to limit zip-bomb-style inputs;
+- unsupported bundle and native-index schema versions fail closed.
+
+Segment JSONL and sidecar metadata use strict JSON parsing. Non-standard
+`NaN`/`Infinity` tokens, duplicate object keys, non-finite numbers, duplicate
+segment indices, missing segment indices, and config drift in sidecar metadata
+are rejected before scoring.
+
+These checks are designed to keep accidental or malicious artifacts from
+silently corrupting reports or exhausting memory. They are not a reason to
+publish private training text in index bundles or raw-text segment reports.

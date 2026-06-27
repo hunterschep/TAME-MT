@@ -79,6 +79,10 @@ tame-mt index inspect train.tameidx
 
 Index bundles store raw training text and normalized exact-match and pair keys.
 Protect them with the same access controls as the original training corpus.
+Index bundle writes are atomic: the output path is replaced only after the new
+ZIP bundle is fully written and closed. Bundle loading rejects unexpected ZIP
+members, duplicate members, unsafe member sizes, excessive compression ratios,
+and unsupported schema versions before native deserialization.
 If `score --index` or `audit --index` reports an unsupported bundle or native
 schema version after an upgrade, rebuild the `.tameidx` file with the current
 `tame-mt index build` command.
@@ -128,6 +132,8 @@ sidecar. Cached commands validate that sidecar when present, including
 normalization, similarity, retrieval settings, TM zero policy, train/test/ref
 counts, and bin thresholds. Older segment JSONL files without a sidecar still
 work, but they cannot be fully checked for config drift.
+When a sidecar is present, cached JSON reports copy the original producing
+backend into `backend.artifact_backend`.
 
 `score-cached` reuses source/target/pair exposure and TM hypotheses from the
 segment JSONL file. It recomputes only system metrics, TM metrics, delta over

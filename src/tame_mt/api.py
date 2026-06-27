@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from typing import Any
 
 from tame_mt.artifacts import validate_segment_artifacts
 from tame_mt.bins import (
@@ -47,6 +48,7 @@ class CachedSegmentScorer:
         tm_results: list[SegmentTMResult],
         refs: list[list[str]],
         num_train: int,
+        artifact_backend: Mapping[str, Any] | None = None,
     ) -> None:
         if not exposures:
             raise InputDataError("segment artifact must contain at least one segment")
@@ -65,6 +67,7 @@ class CachedSegmentScorer:
         self.exposures = [replace(segment) for segment in validated_exposures]
         self.tm_results = [replace(result) for result in validated_tm_results]
         self.refs = [list(ref) for ref in refs]
+        self.artifact_backend = dict(artifact_backend) if artifact_backend is not None else None
         self.tm_hyp = [result.tm_hyp for result in self.tm_results]
         for ref_idx, ref in enumerate(self.refs):
             validate_equal_lengths("segments", self.exposures, f"ref[{ref_idx}]", ref)
@@ -122,6 +125,7 @@ class CachedSegmentScorer:
                 bin_reports=bin_reports,
                 generalization_gap=gen_gap,
                 warnings=warnings,
+                artifact_backend=self.artifact_backend,
             )
         return reports
 
@@ -184,12 +188,14 @@ class TameScorer:
         refs: list[list[str]],
         hyp: list[str],
         num_train: int,
+        artifact_backend: Mapping[str, Any] | None = None,
     ) -> TameReport:
         return self.prepare_from_artifacts(
             exposures=exposures,
             tm_results=tm_results,
             refs=refs,
             num_train=num_train,
+            artifact_backend=artifact_backend,
         ).score(hyp)
 
     def score_many_from_artifacts(
@@ -199,12 +205,14 @@ class TameScorer:
         refs: list[list[str]],
         systems: Mapping[str, list[str]],
         num_train: int,
+        artifact_backend: Mapping[str, Any] | None = None,
     ) -> dict[str, TameReport]:
         return self.prepare_from_artifacts(
             exposures=exposures,
             tm_results=tm_results,
             refs=refs,
             num_train=num_train,
+            artifact_backend=artifact_backend,
         ).score_many(systems)
 
     def prepare_from_artifacts(
@@ -213,6 +221,7 @@ class TameScorer:
         tm_results: list[SegmentTMResult],
         refs: list[list[str]],
         num_train: int,
+        artifact_backend: Mapping[str, Any] | None = None,
     ) -> CachedSegmentScorer:
         return CachedSegmentScorer(
             config=self.config,
@@ -220,6 +229,7 @@ class TameScorer:
             tm_results=tm_results,
             refs=refs,
             num_train=num_train,
+            artifact_backend=artifact_backend,
         )
 
     def evaluate_index_bundle(
@@ -453,7 +463,18 @@ def _build_cached_report(
     bin_reports: list[BinReport],
     generalization_gap: dict[str, float | None],
     warnings: list[str],
+    artifact_backend: Mapping[str, Any] | None,
 ) -> TameReport:
+    backend: dict[str, Any] = {
+        "name": "cached_segments",
+        "native": False,
+        "exact": False,
+        "requested_mode": config.index.mode,
+        "resolved_mode": "cached_segments",
+        "index_reused": True,
+    }
+    if artifact_backend is not None:
+        backend["artifact_backend"] = dict(artifact_backend)
     return TameReport(
         tame_version=__version__,
         signature=build_signature(config, backend_name="cached_segments"),
@@ -461,14 +482,7 @@ def _build_cached_report(
         num_test=num_test,
         num_refs=num_refs,
         config=config_to_dict(config),
-        backend={
-            "name": "cached_segments",
-            "native": False,
-            "exact": False,
-            "requested_mode": config.index.mode,
-            "resolved_mode": "cached_segments",
-            "index_reused": True,
-        },
+        backend=backend,
         system_scores=system_scores,
         tm_scores=tm_scores,
         delta_scores=deltas,

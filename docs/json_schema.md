@@ -37,6 +37,24 @@ paper tables, dashboards, and downstream scripts.
 For `score --index` or `audit --index`, `index_reused` is `true` and `name`
 remains the resolved retrieval backend such as `native_fast`. For
 `score-cached`, `name` is `cached_segments` and `index_reused` is also `true`.
+If segment metadata was available, cached reports also include
+`backend.artifact_backend`, a copy of the backend object from the report that
+created the segment JSONL.
+
+## Config Dependencies
+
+The `config` object includes metric-defining package versions:
+
+```json
+{
+  "dependencies": {
+    "sacrebleu": "2.6.0"
+  }
+}
+```
+
+The report signature also includes the SacreBLEU version, because BLEU/chrF
+implementation changes can affect reported scores.
 
 ## Data
 

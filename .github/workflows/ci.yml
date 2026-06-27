@@ -37,8 +37,59 @@ jobs:
         run: python benchmarks/bench_synthetic.py --small --assert-thresholds
       - name: Staged smoke benchmark
         run: python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
+      - name: Fast retrieval recall validation
+        run: python benchmarks/validate_fast_recall.py --require-native
       - name: Type check
         run: mypy src/tame_mt
+
+  dependency-compatibility:
+    name: SacreBLEU compatibility (${{ matrix.sacrebleu }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sacrebleu:
+          - "sacrebleu>=2.4,<2.5"
+          - "sacrebleu>=2.6,<3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and selected SacreBLEU range
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pip install '${{ matrix.sacrebleu }}'
+      - name: Verify selected SacreBLEU version
+        run: |
+          python - <<'PY'
+          import sacrebleu
+          version = tuple(int(part) for part in sacrebleu.__version__.split(".")[:2])
+          if version[0] != 2:
+              raise SystemExit(f"unsupported SacreBLEU major version: {sacrebleu.__version__}")
+          print(sacrebleu.__version__)
+          PY
+      - name: Compatibility tests
+        run: pytest tests/test_scoring.py tests/test_report.py tests/test_cli.py::test_cli_doctor_reports_environment
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python dependency audit
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit . --progress-spinner off
+      - name: Rust dependency audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
 
   package:
     name: Build package
