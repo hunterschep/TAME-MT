@@ -17,14 +17,14 @@ from tame_mt.normalize import normalize_text
 from tame_mt.similarity import jaccard
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NeighborResult:
     index: int | None
     score: float
     exact: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IndexBackendInfo:
     name: str
     native: bool

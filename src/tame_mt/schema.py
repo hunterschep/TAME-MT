@@ -6,7 +6,7 @@ from typing import Any
 from tame_mt.json_utils import strict_json_dumps
 
 
-@dataclass
+@dataclass(slots=True)
 class SegmentExposure:
     index: int
     source_exposure: float
@@ -21,7 +21,7 @@ class SegmentExposure:
     bin: str
 
 
-@dataclass
+@dataclass(slots=True)
 class SegmentTMResult:
     index: int
     tm_hyp: str
@@ -29,14 +29,14 @@ class SegmentTMResult:
     tm_source_similarity: float
 
 
-@dataclass
+@dataclass(slots=True)
 class ExposureSummary:
     source: dict[str, Any]
     target: dict[str, Any] | None
     pair: dict[str, Any] | None
 
 
-@dataclass
+@dataclass(slots=True)
 class BinReport:
     name: str
     count: int
@@ -47,7 +47,7 @@ class BinReport:
     delta_scores: dict[str, float | None]
 
 
-@dataclass
+@dataclass(slots=True)
 class TameReport:
     tame_version: str
     signature: str

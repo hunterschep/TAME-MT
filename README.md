@@ -637,7 +637,11 @@ about 0.8 seconds for each later prepared cached score. The cached stage is the
 closest analogue to ordinary BLEU/chrF scoring because it no longer touches the
 training corpus. Ordered cached artifacts take a fast validation path, and
 whole-corpus SacreBLEU statistics are reused without copying before bin
-aggregation.
+aggregation. Fresh and indexed audits use slotted per-segment objects to reduce
+memory pressure, native fast-mode query maps use lightweight hashing in the
+candidate loop, and exposure summaries collect each side once, sort once, and
+use binary search for threshold counts instead of rescanning the corpus for
+every threshold.
 Source-only audits and `tm-baseline` queries also use top-1 source retrieval
 unless pair exposure is being computed.
 

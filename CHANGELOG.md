@@ -41,6 +41,13 @@
   deserialization.
 - Optimized native index reuse by avoiding duplicate Python exact maps and by
   persisting normalized exact-pair keys for faster repeated audits.
+- Reduced native query-loop overhead by using the package's lightweight FNV
+  hasher for exact-match and per-query candidate-count maps.
+- Reduced large-audit Python overhead by using slotted dataclasses for
+  configs, reports, per-segment diagnostics, and internal result containers.
+- Optimized exposure-summary generation by collecting side statistics in one
+  pass, sorting each score side once, and using binary search for threshold
+  counts.
 - Hardened cached segment artifact scoring with strict index validation,
   canonical ordering, and safer JSON type parsing.
 - Hardened cached segment JSONL parsing so malformed bin labels and non-string
@@ -55,9 +62,14 @@
   `ConfigurationError` consistently.
 - Rejected unordered and duplicate metric selections in `ScoreConfig` so report
   key order and signatures remain deterministic.
+- Rejected duplicate CLI metric selections instead of silently deduplicating
+  them before configuration validation.
 - Centralized strict JSON parsing/serialization for package artifacts so
   cached segment JSONL and `.tameidx` manifests reject non-standard `NaN` and
   infinity constants and duplicate object keys even in ignored fields.
+- Wrapped output serialization failures in user-facing `OutputError` exceptions
+  and serialize full JSON reports before opening the destination path to avoid
+  partial report files.
 - Improved malformed artifact and index-bundle errors so corrupt numeric fields,
   manifests, and UTF-8 members fail with user-facing TAME-MT exceptions.
 - Optimized cached and repeated scoring by aggregating SacreBLEU segment

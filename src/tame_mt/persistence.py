@@ -31,7 +31,7 @@ ZIP_COMPRESSLEVEL = 1
 MAX_MANIFEST_BYTES = 1_000_000
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IndexBundle:
     """A loaded persistent training index and the raw training corpus it indexes."""
 

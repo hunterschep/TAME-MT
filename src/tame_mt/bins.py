@@ -12,21 +12,21 @@ ALL_GROUP = "__all__"
 TM_GROUP = "__tame_tm__"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BinScoringResult:
     system_scores: dict[str, float | None]
     tm_scores: dict[str, float | None]
     bin_reports: list[BinReport]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MultiBinScoringResult:
     system_scores: dict[str, dict[str, float | None]]
     tm_scores: dict[str, float | None]
     bin_reports: dict[str, list[BinReport]]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BinGroupIndex:
     groups: dict[str, Sequence[int]]
     counts: dict[str, int]

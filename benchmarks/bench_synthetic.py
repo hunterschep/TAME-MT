@@ -5,6 +5,7 @@ import argparse
 import platform
 import tempfile
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from tame_mt import IndexConfig, ScoreConfig, TameScorer, load_index_bundle, save_index_bundle
@@ -66,7 +67,7 @@ def main() -> int:
         "signature": report.signature,
         "python": platform.python_version(),
         "platform": platform.platform(),
-        "native": native_status().__dict__,
+        "native": asdict(native_status()),
     }
     if args.staged:
         if args.batch_systems <= 0:

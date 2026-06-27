@@ -5,7 +5,8 @@ import pytest
 
 from tame_mt import TameScorer
 from tame_mt.artifacts import read_segment_jsonl
-from tame_mt.report import write_segment_jsonl
+from tame_mt.exceptions import OutputError
+from tame_mt.report import write_json_report, write_segment_jsonl
 
 
 def test_report_to_json_contains_schema_version() -> None:
@@ -37,6 +38,23 @@ def test_report_to_json_rejects_non_finite_numbers() -> None:
 
     with pytest.raises(ValueError, match="Out of range"):
         report.to_json()
+
+
+def test_write_json_report_reports_non_finite_numbers_without_partial_file(tmp_path: Path) -> None:
+    report = TameScorer().score_corpus(
+        train_src=["hello world"],
+        train_tgt=["hola mundo"],
+        test_src=["hello world"],
+        refs=[["hola mundo"]],
+        hyp=["hola mundo"],
+    )
+    report.system_scores["bleu"] = float("nan")
+    out = tmp_path / "report.json"
+
+    with pytest.raises(OutputError, match="failed to serialize JSON report"):
+        write_json_report(out, report)
+
+    assert not out.exists()
 
 
 def test_segment_jsonl_multi_ref_texts_are_explicit(tmp_path: Path) -> None:

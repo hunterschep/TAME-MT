@@ -7,7 +7,7 @@ from typing import Any
 from tame_mt.version import __version__
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NativeStatus:
     available: bool
     version: str | None

@@ -21,3 +21,7 @@ class BackendError(TameMTError):
 
 class InputDataError(TameMTError):
     """Raised when corpus inputs are structurally invalid."""
+
+
+class OutputError(TameMTError):
+    """Raised when TAME-MT cannot serialize or write an output artifact."""

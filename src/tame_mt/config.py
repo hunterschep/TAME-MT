@@ -10,7 +10,7 @@ from tame_mt.exceptions import ConfigurationError
 SUPPORTED_METRICS = ("bleu", "chrf")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NormalizationConfig:
     unicode_form: Literal["NFC", "NFD", "NFKC", "NFKD"] = "NFKC"
     strip: bool = True
@@ -29,7 +29,7 @@ class NormalizationConfig:
         _require_bool("normalize_punctuation", self.normalize_punctuation)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SimilarityConfig:
     ngram_orders: tuple[int, ...] = (3, 4, 5)
     similarity: str = "jaccard_set"
@@ -45,7 +45,7 @@ class SimilarityConfig:
             raise ConfigurationError("only jaccard_set similarity is supported in v0.1")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IndexConfig:
     mode: str = "auto"
     topk: int = 50
@@ -82,7 +82,7 @@ class IndexConfig:
             raise ConfigurationError("rerank_limit must be no larger than max_candidates")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BinConfig:
     far_threshold: float = 0.30
     near_threshold: float = 0.70
@@ -103,7 +103,7 @@ class BinConfig:
         _require_non_negative_int("min_bin_size_warning", self.min_bin_size_warning)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TMConfig:
     zero_policy: str = "empty"
 
@@ -114,7 +114,7 @@ class TMConfig:
             raise ConfigurationError("tm zero_policy must be 'empty' or 'nearest'")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MetricConfig:
     bleu_tokenize: str = "13a"
     bleu_lowercase: bool = False
@@ -127,7 +127,7 @@ class MetricConfig:
         _require_non_negative_int("chrf_word_order", self.chrf_word_order)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ScoreConfig:
     metrics: tuple[str, ...] = ("bleu", "chrf")
     normalization: NormalizationConfig = field(default_factory=NormalizationConfig)

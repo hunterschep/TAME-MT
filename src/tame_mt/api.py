@@ -26,7 +26,7 @@ from tame_mt.version import __version__
 from tame_mt.warnings import generate_warnings
 
 
-@dataclass
+@dataclass(slots=True)
 class EvaluationResult:
     """Full evaluation result, including report and optional artifacts."""
 

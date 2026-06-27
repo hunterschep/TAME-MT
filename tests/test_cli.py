@@ -841,3 +841,28 @@ def test_cli_rejects_malformed_numeric_configuration(
     captured = capsys.readouterr()
     assert rc == 2
     assert expected_error in captured.err
+
+
+def test_cli_rejects_duplicate_metrics(capsys) -> None:
+    rc = main(
+        [
+            "score",
+            "--metrics",
+            "bleu",
+            "BLEU",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "duplicate metrics" in captured.err

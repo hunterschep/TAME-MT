@@ -119,6 +119,14 @@ internal segment-stat APIs, TAME-MT falls back to SacreBLEU's public corpus
 scoring APIs so scoring remains correct, with reduced bin-scoring performance
 until the optimized adapter is updated.
 
+Fresh and indexed audits also avoid avoidable Python work around retrieval:
+native query candidate maps use the same lightweight FNV hashing strategy as
+the compact n-gram table, per-segment result objects use slotted dataclasses to
+reduce memory pressure, and exposure summaries collect source/target/pair
+scores in one pass before sorting each side once. Threshold counts then use
+binary search over the sorted scores instead of rescanning every segment for
+each threshold.
+
 When pair exposure is not requested, for example `tm-baseline` or source-only
 audits without references, TAME-MT queries only the nearest source neighbor
 instead of the configured pair-candidate `top-k`.

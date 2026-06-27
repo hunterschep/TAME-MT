@@ -10,6 +10,8 @@ type NeighborTuple = (Option<usize>, f64, bool);
 type GramId = u32;
 type DocId = u32;
 type GramToIdMap = HashMap<Vec<u8>, GramId, BuildHasherDefault<FnvHasher>>;
+type ExactMap = HashMap<String, usize, BuildHasherDefault<FnvHasher>>;
+type CandidateCountMap = HashMap<usize, usize, BuildHasherDefault<FnvHasher>>;
 
 const FNV_OFFSET_BASIS_64: u64 = 0xcbf29ce484222325;
 const FNV_PRIME_64: u64 = 0x00000100000001b3;
@@ -45,7 +47,7 @@ struct NativeNgramIndex {
     gram_sets: Vec<Vec<GramId>>,
     postings: Vec<Vec<DocId>>,
     gram_to_id: GramToIdMap,
-    exact_map: HashMap<String, usize>,
+    exact_map: ExactMap,
     ngram_orders: Vec<usize>,
     mode: String,
     candidate_gram_limit: usize,
@@ -104,7 +106,7 @@ impl NativeNgramIndex {
         let mut gram_sets: Vec<Vec<GramId>> = Vec::with_capacity(normalized_lines.len());
         let mut postings: Vec<Vec<DocId>> = Vec::new();
         let mut gram_to_id = GramToIdMap::default();
-        let mut exact_map: HashMap<String, usize> = HashMap::new();
+        let mut exact_map = ExactMap::default();
 
         for (idx, line) in normalized_lines.iter().enumerate() {
             exact_map.entry(line.clone()).or_insert(idx);
@@ -385,8 +387,8 @@ impl NativeNgramIndex {
         (query_count, query_ids)
     }
 
-    fn candidate_counts_exact(&self, query_ids: &[GramId]) -> HashMap<usize, usize> {
-        let mut counts: HashMap<usize, usize> = HashMap::new();
+    fn candidate_counts_exact(&self, query_ids: &[GramId]) -> CandidateCountMap {
+        let mut counts = CandidateCountMap::default();
         for gram_id in query_ids {
             for index in &self.postings[*gram_id as usize] {
                 *counts.entry(*index as usize).or_insert(0) += 1;
@@ -395,7 +397,7 @@ impl NativeNgramIndex {
         counts
     }
 
-    fn candidate_counts_fast(&self, query_ids: &[GramId]) -> HashMap<usize, usize> {
+    fn candidate_counts_fast(&self, query_ids: &[GramId]) -> CandidateCountMap {
         let mut ranked_grams: Vec<(usize, GramId)> = query_ids
             .iter()
             .map(|gram_id| (self.postings[*gram_id as usize].len(), *gram_id))
@@ -430,7 +432,7 @@ impl NativeNgramIndex {
                 .collect();
         }
 
-        let mut counts: HashMap<usize, usize> = HashMap::new();
+        let mut counts = CandidateCountMap::default();
         for gram_id in selected {
             for index in self.postings[gram_id as usize]
                 .iter()
@@ -461,7 +463,7 @@ impl NativeNgramIndex {
         &self,
         query_count: usize,
         query_ids: &[GramId],
-        intersection_counts: HashMap<usize, usize>,
+        intersection_counts: CandidateCountMap,
         k: usize,
     ) -> Vec<NeighborTuple> {
         let mut results: Vec<NeighborTuple> = Vec::with_capacity(intersection_counts.len());

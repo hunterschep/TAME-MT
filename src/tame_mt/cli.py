@@ -652,7 +652,7 @@ def _parse_metrics(values: list[str]) -> tuple[str, ...]:
     parsed: list[str] = []
     for value in values:
         parsed.extend(part.strip().lower() for part in value.split(",") if part.strip())
-    return tuple(dict.fromkeys(parsed))
+    return tuple(parsed)
 
 
 def _read_system_specs(specs: list[str]) -> dict[str, list[str]]:

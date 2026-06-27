@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from tame_mt.config import ScoreConfig
+from tame_mt.exceptions import OutputError
 from tame_mt.io import ensure_parent_dir, open_text
-from tame_mt.json_utils import strict_json_dump, strict_json_dumps
+from tame_mt.json_utils import strict_json_dumps
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.version import __version__
 
@@ -93,10 +94,13 @@ def _render_backend(report: TameReport) -> list[str]:
 
 def write_json_report(path: str | Path, report: TameReport) -> None:
     output_path = Path(path)
+    try:
+        payload = strict_json_dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n"
+    except ValueError as exc:
+        raise OutputError(f"failed to serialize JSON report: {exc}") from exc
     ensure_parent_dir(output_path)
     with open_text(output_path, "w") as handle:
-        strict_json_dump(report.to_dict(), handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
+        handle.write(payload)
 
 
 def write_segment_jsonl(
@@ -149,7 +153,13 @@ def write_segment_jsonl(
                 payload["neighbor_source_text"] = train_src[segment.source_nn_index]
                 if train_tgt is not None:
                     payload["neighbor_target_text"] = train_tgt[segment.source_nn_index]
-            handle.write(strict_json_dumps(payload, ensure_ascii=False) + "\n")
+            try:
+                line = strict_json_dumps(payload, ensure_ascii=False)
+            except ValueError as exc:
+                raise OutputError(
+                    f"failed to serialize segment JSONL row {segment.index}: {exc}"
+                ) from exc
+            handle.write(line + "\n")
 
 
 def _normalization_signature(config: ScoreConfig) -> str:

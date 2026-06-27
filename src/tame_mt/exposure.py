@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass
-from statistics import mean, median
 
 from tame_mt.bins import assign_bin_values
 from tame_mt.config import ScoreConfig
@@ -12,7 +12,7 @@ from tame_mt.normalize import normalize_text
 from tame_mt.schema import ExposureSummary, SegmentExposure
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExposureComputation:
     segments: list[SegmentExposure]
     backend: IndexBackendInfo
@@ -145,44 +145,35 @@ def compute_exposure_result(
 
 
 def summarize_exposures(exposures: list[SegmentExposure], config: ScoreConfig) -> ExposureSummary:
+    source_scores: list[float] = []
+    source_exact_flags: list[bool] = []
+    target_scores: list[float] = []
+    target_exact_flags: list[bool] = []
+    pair_scores: list[float] = []
+    pair_exact_flags: list[bool] = []
+
+    for segment in exposures:
+        source_scores.append(segment.source_exposure)
+        source_exact_flags.append(segment.source_exact)
+        if segment.target_exposure is not None:
+            target_scores.append(segment.target_exposure)
+        if segment.target_exact is not None:
+            target_exact_flags.append(bool(segment.target_exact))
+        if segment.pair_exposure is not None:
+            pair_scores.append(segment.pair_exposure)
+        if segment.pair_exact is not None:
+            pair_exact_flags.append(bool(segment.pair_exact))
+
     return ExposureSummary(
-        source=_summarize_side(
-            [segment.source_exposure for segment in exposures],
-            [segment.source_exact for segment in exposures],
-            config.bins.leak_thresholds,
-        ),
+        source=_summarize_side(source_scores, source_exact_flags, config.bins.leak_thresholds),
         target=(
-            _summarize_side(
-                [
-                    segment.target_exposure
-                    for segment in exposures
-                    if segment.target_exposure is not None
-                ],
-                [
-                    bool(segment.target_exact)
-                    for segment in exposures
-                    if segment.target_exact is not None
-                ],
-                config.bins.leak_thresholds,
-            )
-            if any(segment.target_exposure is not None for segment in exposures)
+            _summarize_side(target_scores, target_exact_flags, config.bins.leak_thresholds)
+            if target_scores
             else None
         ),
         pair=(
-            _summarize_side(
-                [
-                    segment.pair_exposure
-                    for segment in exposures
-                    if segment.pair_exposure is not None
-                ],
-                [
-                    bool(segment.pair_exact)
-                    for segment in exposures
-                    if segment.pair_exact is not None
-                ],
-                config.bins.leak_thresholds,
-            )
-            if any(segment.pair_exposure is not None for segment in exposures)
+            _summarize_side(pair_scores, pair_exact_flags, config.bins.leak_thresholds)
+            if pair_scores
             else None
         ),
     )
@@ -205,26 +196,27 @@ def _summarize_side(
             "exact_overlap": None,
             "at_threshold": {f"{threshold:.2f}": None for threshold in thresholds},
         }
+    sorted_scores = sorted(scores)
+    score_count = len(sorted_scores)
     return {
-        "mean": float(mean(scores)),
-        "median": float(median(scores)),
-        "p05": _percentile(scores, 5),
-        "p25": _percentile(scores, 25),
-        "p75": _percentile(scores, 75),
-        "p95": _percentile(scores, 95),
-        "max": float(max(scores)),
+        "mean": float(sum(sorted_scores) / score_count),
+        "median": _percentile_sorted(sorted_scores, 50),
+        "p05": _percentile_sorted(sorted_scores, 5),
+        "p25": _percentile_sorted(sorted_scores, 25),
+        "p75": _percentile_sorted(sorted_scores, 75),
+        "p95": _percentile_sorted(sorted_scores, 95),
+        "max": float(sorted_scores[-1]),
         "exact_overlap": sum(exact_flags) / len(exact_flags) if exact_flags else None,
         "at_threshold": {
-            f"{threshold:.2f}": sum(score >= threshold for score in scores) / len(scores)
+            f"{threshold:.2f}": (score_count - bisect_left(sorted_scores, threshold)) / score_count
             for threshold in thresholds
         },
     }
 
 
-def _percentile(values: list[float], percentile: float) -> float:
-    if not values:
+def _percentile_sorted(sorted_values: list[float], percentile: float) -> float:
+    if not sorted_values:
         raise ValueError("cannot compute a percentile of an empty list")
-    sorted_values = sorted(values)
     if len(sorted_values) == 1:
         return float(sorted_values[0])
     rank = (percentile / 100.0) * (len(sorted_values) - 1)

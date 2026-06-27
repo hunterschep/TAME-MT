@@ -206,10 +206,17 @@ TAME-MT raises subclasses of `tame_mt.exceptions.TameMTError` for user-facing
 failures:
 
 ```python
-from tame_mt.exceptions import AlignmentError, BackendError, ConfigurationError, InputDataError
+from tame_mt.exceptions import (
+    AlignmentError,
+    BackendError,
+    ConfigurationError,
+    InputDataError,
+    OutputError,
+)
 ```
 
 `AlignmentError` means aligned files have different lengths. `ConfigurationError`
 means a config value is invalid. `InputDataError` means the corpus is
 structurally invalid, such as an empty training source file. `BackendError`
 means an explicitly requested native backend was unavailable or failed to build.
+`OutputError` means TAME-MT could not serialize or write an output artifact.
