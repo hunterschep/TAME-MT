@@ -144,6 +144,11 @@ config = ScoreConfig(
 Metric-changing configuration and the resolved retrieval backend are recorded in
 the report signature.
 
+Configuration dataclasses validate both type and value at construction time.
+Integer settings reject booleans and floats, exposure thresholds must be finite
+numbers in \([0, 1]\), and invalid values raise `ConfigurationError` before any
+corpus work starts.
+
 ## Exceptions
 
 TAME-MT raises subclasses of `tame_mt.exceptions.TameMTError` for user-facing

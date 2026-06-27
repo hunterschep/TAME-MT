@@ -27,8 +27,8 @@ class SimilarityConfig:
     def __post_init__(self) -> None:
         if not self.ngram_orders:
             raise ConfigurationError("ngram_orders must contain at least one order")
-        if any(order <= 0 for order in self.ngram_orders):
-            raise ConfigurationError("ngram_orders must be positive integers")
+        for order in self.ngram_orders:
+            _require_positive_int("ngram_orders", order)
         if self.similarity != "jaccard_set":
             raise ConfigurationError("only jaccard_set similarity is supported in v0.1")
 
@@ -58,18 +58,12 @@ class IndexConfig:
                 "index mode must be one of: auto, inverted_exact, inverted_fast, "
                 "python_exact, python_fast, native_exact, native_fast"
             )
-        if self.topk <= 0:
-            raise ConfigurationError("pair/top-k value must be positive")
-        if self.auto_exact_cutoff < 0:
-            raise ConfigurationError("auto_exact_cutoff must be non-negative")
-        if self.candidate_gram_limit <= 0:
-            raise ConfigurationError("candidate_gram_limit must be positive")
-        if self.posting_limit <= 0:
-            raise ConfigurationError("posting_limit must be positive")
-        if self.max_candidates <= 0:
-            raise ConfigurationError("max_candidates must be positive")
-        if self.rerank_limit <= 0:
-            raise ConfigurationError("rerank_limit must be positive")
+        _require_positive_int("topk", self.topk)
+        _require_non_negative_int("auto_exact_cutoff", self.auto_exact_cutoff)
+        _require_positive_int("candidate_gram_limit", self.candidate_gram_limit)
+        _require_positive_int("posting_limit", self.posting_limit)
+        _require_positive_int("max_candidates", self.max_candidates)
+        _require_positive_int("rerank_limit", self.rerank_limit)
         if self.rerank_limit > self.max_candidates:
             raise ConfigurationError("rerank_limit must be no larger than max_candidates")
 
@@ -90,8 +84,7 @@ class BinConfig:
             _require_unit_interval("leak_thresholds", threshold)
         if self.far_threshold > self.near_threshold:
             raise ConfigurationError("far_threshold must be no larger than near_threshold")
-        if self.min_bin_size_warning < 0:
-            raise ConfigurationError("min_bin_size_warning must be non-negative")
+        _require_non_negative_int("min_bin_size_warning", self.min_bin_size_warning)
 
 
 @dataclass(frozen=True)
@@ -110,8 +103,7 @@ class MetricConfig:
     chrf_word_order: int = 2
 
     def __post_init__(self) -> None:
-        if self.chrf_word_order < 0:
-            raise ConfigurationError("chrf_word_order must be non-negative")
+        _require_non_negative_int("chrf_word_order", self.chrf_word_order)
 
 
 @dataclass(frozen=True)
@@ -165,6 +157,8 @@ def parse_int_tuple(value: str) -> tuple[int, ...]:
 
 
 def _require_finite(name: str, value: float) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ConfigurationError(f"{name} must be a finite number")
     if not isfinite(value):
         raise ConfigurationError(f"{name} must be a finite number")
 
@@ -173,3 +167,21 @@ def _require_unit_interval(name: str, value: float) -> None:
     _require_finite(name, value)
     if value < 0 or value > 1:
         raise ConfigurationError(f"{name} must be between 0 and 1")
+
+
+def _require_int(name: str, value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(f"{name} must be an integer")
+    return value
+
+
+def _require_positive_int(name: str, value: object) -> None:
+    parsed = _require_int(name, value)
+    if parsed <= 0:
+        raise ConfigurationError(f"{name} must be positive")
+
+
+def _require_non_negative_int(name: str, value: object) -> None:
+    parsed = _require_int(name, value)
+    if parsed < 0:
+        raise ConfigurationError(f"{name} must be non-negative")

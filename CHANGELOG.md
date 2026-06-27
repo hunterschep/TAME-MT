@@ -41,6 +41,8 @@
   infinity values.
 - Rejected out-of-range exposure thresholds and malformed comma-separated
   numeric CLI lists so large batch runs fail fast on invalid configuration.
+- Tightened Python API configuration validation so boolean, float, string, and
+  other malformed numeric options raise `ConfigurationError` consistently.
 - Centralized strict JSON parsing/serialization for package artifacts so
   cached segment JSONL and `.tameidx` manifests reject non-standard `NaN` and
   infinity constants and duplicate object keys even in ignored fields.
