@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import statistics
 from dataclasses import dataclass
 
@@ -113,6 +114,8 @@ def build_cases(train_size: int, test_size: int) -> list[RecallCase]:
         _domain_template_case(train_size, test_size),
         _multilingual_case(max(800, train_size // 3), max(120, test_size // 3)),
         _lexical_family_case(max(1_200, train_size // 2), max(160, test_size // 2)),
+        _duplicate_heavy_case(max(1_500, train_size // 2), max(180, test_size // 2)),
+        _noisy_perturbation_case(max(1_500, train_size // 2), max(180, test_size // 2)),
     ]
 
 
@@ -179,6 +182,84 @@ def _lexical_family_case(train_size: int, test_size: int) -> RecallCase:
     ]
     exact_queries = [train[(idx * 31) % train_size] for idx in range(max(1, test_size // 5))]
     return RecallCase("lexical_family", train, queries, exact_queries)
+
+
+def _duplicate_heavy_case(train_size: int, test_size: int) -> RecallCase:
+    boilerplates = [
+        "copyright notice reusable translation memory segment",
+        "common website navigation reusable translation memory segment",
+        "product catalog reusable translation memory segment",
+    ]
+    train = [
+        " ".join(
+            [
+                boilerplates[idx % len(boilerplates)],
+                f"region{idx % 23}",
+                f"sku{idx:06d}",
+                f"variant{(idx * 37) % 997}",
+            ]
+        )
+        for idx in range(train_size)
+    ]
+    queries = [
+        train[(idx * 17) % train_size]
+        if idx % 4 == 0
+        else " ".join(
+            [
+                boilerplates[idx % len(boilerplates)],
+                f"region{idx % 23}",
+                f"sku-heldout-{idx:06d}",
+                f"variant{(idx * 37) % 997}",
+            ]
+        )
+        for idx in range(test_size)
+    ]
+    exact_queries = [train[(idx * 29) % train_size] for idx in range(max(1, test_size // 5))]
+    return RecallCase("duplicate_heavy", train, queries, exact_queries)
+
+
+def _noisy_perturbation_case(train_size: int, test_size: int) -> RecallCase:
+    rng = random.Random(17)
+    domains = ["medical", "legal", "support", "finance", "education"]
+    verbs = ["confirm", "review", "translate", "archive", "publish", "compare"]
+    objects = ["record", "form", "message", "notice", "article", "dataset"]
+    modifiers = ["urgent", "draft", "regional", "final", "manual", "automated"]
+    train = [
+        " ".join(
+            [
+                domains[idx % len(domains)],
+                verbs[(idx * 3) % len(verbs)],
+                objects[(idx * 5) % len(objects)],
+                modifiers[(idx * 7) % len(modifiers)],
+                f"case{idx:05d}",
+                f"checksum{(idx * 104729) % 999983}",
+            ]
+        )
+        for idx in range(train_size)
+    ]
+    queries: list[str] = []
+    for idx in range(test_size):
+        source = train[(idx * 41) % train_size]
+        if idx % 5 == 0:
+            queries.append(source)
+        else:
+            queries.append(_perturb_sentence(source, rng))
+    exact_queries = [train[(idx * 43) % train_size] for idx in range(max(1, test_size // 5))]
+    return RecallCase("noisy_perturbation", train, queries, exact_queries)
+
+
+def _perturb_sentence(sentence: str, rng: random.Random) -> str:
+    tokens = sentence.split()
+    if len(tokens) < 3:
+        return sentence
+    token_index = rng.randrange(1, len(tokens))
+    token = tokens[token_index]
+    if len(token) <= 3:
+        tokens[token_index] = f"{token}x"
+    else:
+        cut = rng.randrange(1, len(token) - 1)
+        tokens[token_index] = f"{token[:cut]}x{token[cut + 1 :]}"
+    return " ".join(tokens)
 
 
 def _quantile(values: list[float], q: float) -> float:

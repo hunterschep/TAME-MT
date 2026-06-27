@@ -39,11 +39,17 @@ The `Release` workflow supports two modes:
 - `workflow_dispatch` from a branch or tag builds and validates distributions as
   a dry run.
 - pushing a `v*` tag builds the source distribution and wheels, runs wheel smoke
-  tests, runs `twine check`, generates an SBOM artifact, attests build
-  provenance, and publishes to PyPI through trusted publishing.
+  tests, runs `twine check`, and generates an SBOM artifact. It does not
+  publish automatically.
+- `workflow_dispatch` from a `v*` tag with `publish=true` publishes the already
+  validated artifacts to PyPI through trusted publishing after the protected
+  `pypi` environment allows the job to proceed.
 
 Publishing requires the `pypi` GitHub environment to be configured for trusted
 publishing on PyPI. Do not use long-lived PyPI API tokens for normal releases.
+The workflow pins third-party actions to immutable commit SHAs; update those
+pins deliberately during release-maintenance work rather than floating them on
+every run.
 
 ## Supply-Chain Checks
 
@@ -54,6 +60,8 @@ CI runs:
 - SacreBLEU compatibility tests for the minimum supported 2.x range and the
   current supported 2.x range;
 - cross-platform wheel builds and installed-wheel smoke tests.
+- a dedicated larger staged performance smoke test in CI, plus the heavier
+  local 100k benchmark in `scripts/acceptance.sh`.
 
 Release artifacts should include:
 

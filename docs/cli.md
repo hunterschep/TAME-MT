@@ -82,10 +82,17 @@ Protect them with the same access controls as the original training corpus.
 Index bundle writes are atomic: the output path is replaced only after the new
 ZIP bundle is fully written and closed. Bundle loading rejects unexpected ZIP
 members, duplicate members, unsafe member sizes, excessive compression ratios,
-and unsupported schema versions before native deserialization.
+load-memory budget violations, and unsupported schema versions before native
+deserialization. Native bytes are also invariant-checked before queries can run.
 If `score --index` or `audit --index` reports an unsupported bundle or native
 schema version after an upgrade, rebuild the `.tameidx` file with the current
 `tame-mt index build` command.
+
+For trusted large bundles on high-memory machines, raise the load budget:
+
+```bash
+--max-index-load-bytes 8589934592
+```
 
 For large corpora or repeated system comparisons, cache segment diagnostics once:
 
@@ -157,6 +164,7 @@ ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 --near-threshold 0.70
 --leak-thresholds 0.70,0.85,0.95
 --pair-k 50
+--batch-size 8192
 --index-mode auto
 --auto-exact-cutoff 5000
 --candidate-gram-limit 8
@@ -183,6 +191,8 @@ empty items.
 Long-running commands support `--verbose`, which writes stage timings to
 stderr without changing report output. This covers `score`, `audit`,
 `score-cached`, `score-cached-batch`, `index build`, and `tm-baseline`.
+Lower `--batch-size` if source/reference retrieval batches use too much memory
+on a very large test set.
 
 ## Doctor
 

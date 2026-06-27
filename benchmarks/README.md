@@ -19,6 +19,17 @@ time, load-plus-audit total time, end-to-end cached scoring time, prepared
 cached scorer setup time, prepared cached hypothesis time, prepared batch
 per-system time, and bundle size.
 
+Run the fast-retrieval recall guard:
+
+```bash
+python benchmarks/validate_fast_recall.py --require-native
+```
+
+It compares fast retrieval against exact retrieval on deterministic
+domain-template, multilingual, lexical-family, duplicate-heavy, and noisy
+perturbation cases. This is a regression guard for approximation drift, not a
+proof that every future corpus has perfect recall.
+
 Run a larger local check:
 
 ```bash
@@ -35,6 +46,10 @@ python benchmarks/bench_synthetic.py \
   --max-index-bytes 120000000 \
   --assert-thresholds
 ```
+
+CI runs a 50k train / 1k test staged benchmark outside the Python-version
+matrix. The 100k local check above remains the release-candidate gate in
+`scripts/acceptance.sh`.
 
 For public-corpus timing, use:
 

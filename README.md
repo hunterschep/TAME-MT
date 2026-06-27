@@ -96,8 +96,9 @@ The `.tameidx` bundle stores compressed native source/target indexes plus the
 raw training text needed for TM outputs and optional segment reports. Treat it
 like the original training corpus for privacy and access control. Bundle
 loading rejects unexpected ZIP members, duplicate names, unsafe declared sizes,
-excessive compression ratios, and unsupported native-index schema versions
-before deserializing native bytes.
+excessive compression ratios, default load-memory budget violations, and
+unsupported native-index schema versions before deserializing native bytes.
+Native bytes are then invariant-checked before the index can answer queries.
 
 If the train/test/reference setup is fixed and only hypotheses change, cache
 the train-aware diagnostics once and reuse them:
@@ -649,10 +650,10 @@ closest analogue to ordinary BLEU/chrF scoring because it no longer touches the
 training corpus. Ordered cached artifacts take a fast validation path, and
 whole-corpus SacreBLEU statistics are reused without copying before bin
 aggregation. Fresh and indexed audits use slotted per-segment objects to reduce
-memory pressure, native fast-mode query maps use lightweight hashing in the
-candidate loop, and exposure summaries collect each side once, sort once, and
-use binary search for threshold counts instead of rescanning the corpus for
-every threshold.
+memory pressure, native maps use randomized hashing to reduce collision-DoS
+exposure, evaluation retrieval runs in configurable chunks, and exposure
+summaries collect each side once, sort once, and use binary search for
+threshold counts instead of rescanning the corpus for every threshold.
 Source-only audits and `tm-baseline` queries also use top-1 source retrieval
 unless pair exposure is being computed.
 
@@ -685,9 +686,11 @@ lines and normalized exact-match and pair keys so later runs can produce
 identical TM outputs and optional neighbor-text diagnostics. Do not publish
 `.tameidx` files unless the underlying training corpus can also be published.
 Treat `.tameidx` files from unknown sources as untrusted inputs. The loader
-enforces size and compression-ratio limits and validates the archive shape
-before native deserialization, but the safest workflow is still to rebuild
-bundles from trusted `train.src`/`train.tgt` files.
+enforces size, compression-ratio, and default load-memory limits, validates the
+archive shape, and validates native index invariants before queries can run, but
+the safest workflow is still to rebuild bundles from trusted
+`train.src`/`train.tgt` files. Use `--max-index-load-bytes` only for trusted
+large bundles on machines with enough memory.
 
 ## Limitations
 
@@ -720,7 +723,11 @@ python -m twine check dist/*
 For release work, run `scripts/acceptance.sh` locally and see
 [`docs/release.md`](docs/release.md). Tagged releases are built by GitHub
 Actions, checked with `twine`, audited, attested, accompanied by an SBOM
-artifact, and published through PyPI trusted publishing.
+artifact, and published through PyPI trusted publishing only after a manual
+tagged workflow dispatch with `publish=true`.
+CI also runs a larger staged benchmark outside the Python-version matrix; the
+local acceptance script keeps the heavier 100k train / 2k test performance gate
+for release candidates.
 
 ## Citation
 

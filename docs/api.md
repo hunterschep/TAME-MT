@@ -97,6 +97,10 @@ result = TameScorer(config).evaluate_index_bundle(
 `result.report.backend["index_reused"]` is `True` for this path. Bundle loading
 validates normalization, similarity, backend mode, and fast-mode settings before
 scoring so stale indexes do not silently produce mismatched signatures.
+It also enforces a default uncompressed load-memory budget before reading raw
+training text, native index bytes, or exact-pair keys into memory. Pass
+`max_load_bytes=...` only for trusted large bundles on machines with enough
+RAM, or `max_load_bytes=None` to disable that guard deliberately.
 
 Index bundles store raw training text and normalized exact-match and pair keys.
 Treat them as training data.
@@ -224,7 +228,7 @@ from tame_mt import BinConfig, IndexConfig, MetricConfig, ScoreConfig, Similarit
 config = ScoreConfig(
     metrics=("bleu", "chrf"),
     similarity=SimilarityConfig(ngram_orders=(2, 3, 4, 5)),
-    index=IndexConfig(topk=100),
+    index=IndexConfig(topk=100, batch_size=4096),
     bins=BinConfig(far_threshold=0.25, near_threshold=0.75),
     metric=MetricConfig(bleu_tokenize="13a", chrf_word_order=2),
 )

@@ -24,10 +24,12 @@ overlap rates remain exact.
 
 Release acceptance includes `benchmarks/validate_fast_recall.py`, which compares
 fast retrieval with exact retrieval on deterministic domain-template,
-multilingual, and lexical-family corpora. The guard requires exact-match recall
-of 1.0 and enforces top-1 agreement and score-gap ceilings. This is not a proof
-that every corpus is recall-safe; it is a regression test that the approximate
-path stays characterized instead of drifting silently.
+multilingual, lexical-family, duplicate-heavy, and noisy-perturbation corpora.
+The guard requires exact-match recall of 1.0 and enforces top-1 agreement and
+score-gap ceilings. This is not a proof that every corpus is recall-safe; it is
+a regression test that the approximate path stays characterized instead of
+drifting silently. CI also runs a larger non-matrix staged benchmark so obvious
+performance regressions fail before release.
 
 ## Recommended Workflow
 
@@ -129,14 +131,21 @@ scoring remains correct, with reduced bin-scoring performance until the
 optimized adapter is updated.
 
 Fresh and indexed audits also avoid avoidable Python work around retrieval:
-native query candidate maps use the same lightweight FNV hashing strategy as
-the compact n-gram table, per-segment result objects use slotted dataclasses to
-reduce memory pressure, and exposure summaries collect source/target/pair
-scores in one pass before sorting each side once. Threshold counts then use
-binary search over the sorted scores instead of rescanning every segment for
-each threshold. Fresh native audits also release Python-side normalized
-training-line copies after exact pair keys are prepared; the Rust indexes keep
-the state needed for exact checks and nearest-neighbor queries.
+per-segment result objects use slotted dataclasses to reduce memory pressure,
+evaluation retrieval runs in configurable chunks, and exposure summaries collect
+source/target/pair scores in one pass before sorting each side once. Threshold
+counts then use binary search over the sorted scores instead of rescanning every
+segment for each threshold. Fresh native audits also release Python-side
+normalized training-line copies after exact pair keys are prepared; the Rust
+indexes keep the state needed for exact checks and nearest-neighbor queries.
+Native maps use Rust's randomized default hashing rather than a fixed public
+hash, reducing collision-DoS exposure when indexing untrusted text.
+
+For large indexed runs, `score --index` and `audit --index` enforce a default
+uncompressed bundle load budget before reading raw training text, native index
+bytes, or exact-pair keys into memory. Raise `--max-index-load-bytes` only for a
+trusted `.tameidx` bundle on a machine with enough RAM. Lower `--batch-size`
+when test/reference retrieval batches need a smaller peak memory footprint.
 
 When pair exposure is not requested, for example `tm-baseline` or source-only
 audits without references, TAME-MT queries only the nearest source neighbor
