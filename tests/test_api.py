@@ -58,6 +58,45 @@ def test_score_from_artifacts_sorts_reordered_segments() -> None:
     assert report.bins[-1].mean_source_exposure == 0.1
 
 
+def test_score_many_from_artifacts_matches_single_system_reports() -> None:
+    exposures = [
+        _segment(0, 1.0, "source_exact"),
+        _segment(1, 0.1, "far"),
+    ]
+    tm_results = [
+        SegmentTMResult(index=0, tm_hyp="good", tm_source_index=0, tm_source_similarity=1.0),
+        SegmentTMResult(index=1, tm_hyp="bad", tm_source_index=1, tm_source_similarity=0.1),
+    ]
+    refs = [["good", "bad"]]
+    systems = {
+        "baseline": ["good", "bad"],
+        "variant": ["good", "different"],
+    }
+
+    scorer = TameScorer()
+    batch_reports = scorer.score_many_from_artifacts(
+        exposures=exposures,
+        tm_results=tm_results,
+        refs=refs,
+        systems=systems,
+        num_train=2,
+    )
+    single_report = scorer.score_from_artifacts(
+        exposures=exposures,
+        tm_results=tm_results,
+        refs=refs,
+        hyp=systems["baseline"],
+        num_train=2,
+    )
+
+    assert set(batch_reports) == {"baseline", "variant"}
+    assert batch_reports["baseline"].to_dict() == single_report.to_dict()
+    assert (
+        batch_reports["variant"].system_scores["chrf"]
+        != batch_reports["baseline"].system_scores["chrf"]
+    )
+
+
 def test_score_from_artifacts_rejects_missing_segment_index() -> None:
     exposures = [_segment(1, 0.1, "far")]
     tm_results = [

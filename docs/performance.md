@@ -118,3 +118,11 @@ until the optimized adapter is updated.
 When pair exposure is not requested, for example `tm-baseline` or source-only
 audits without references, TAME-MT queries only the nearest source neighbor
 instead of the configured pair-candidate `top-k`.
+
+For many systems on the same cached diagnostics, use `score-cached-batch`
+instead of one `score-cached` process per system. Batch mode reads and validates
+the segment JSONL once, keeps SacreBLEU reference caches alive across all
+systems for each metric, and computes TM baseline scores once for the batch. On
+the local synthetic 100,000 train / 2,000 test benchmark, scoring five cached
+systems took about 2.1 seconds as repeated single-system calls and about 1.0
+second through the batch API.

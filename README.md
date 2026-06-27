@@ -114,11 +114,21 @@ tame-mt score-cached \
   --hyp system_a.out \
   --num-train 125000 \
   --json-out system_a.tame.json
+
+tame-mt score-cached-batch \
+  --segment-in segments.jsonl \
+  --ref test.ref \
+  --system system_a=system_a.out \
+  --system system_b=system_b.out \
+  --num-train 125000 \
+  --json-out-dir tame_reports
 ```
 
 `score-cached` does not rebuild the training index. That makes repeated scoring
 of new hypotheses close to ordinary BLEU/chrF scoring cost after the first
-audit.
+audit. When evaluating many systems, `score-cached-batch` reads and validates
+the cached segment diagnostics once and computes the TM baseline once for the
+whole batch.
 
 Try the bundled toy example:
 
@@ -624,12 +634,14 @@ For production evaluation, use a staged workflow:
    corpus.
 2. Run `tame-mt audit --index train.tameidx --segment-out segments.jsonl` once
    for a fixed train/test/reference setup.
-3. Run `tame-mt score-cached` for every system output.
+3. Run `tame-mt score-cached-batch` for all system outputs from that setup.
 
 The index stage avoids rebuilding source/target postings. The audit stage is
 train-aware and does nearest-neighbor retrieval. The cached-score stage reuses
 exposure and TM hypotheses, so adding another system output does not require
-another pass over the training corpus.
+another pass over the training corpus. Batch cached scoring also avoids
+re-reading segment diagnostics and recomputing TM metric baselines for every
+system.
 
 ## Privacy
 

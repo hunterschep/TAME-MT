@@ -189,6 +189,102 @@ def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
     assert cached["exposure"] == full["exposure"]
 
 
+def test_cli_score_cached_batch_writes_per_system_reports(tmp_path: Path) -> None:
+    segments = tmp_path / "segments.jsonl"
+    output_dir = tmp_path / "reports"
+    variant_hyp = tmp_path / "variant.out"
+    write_lines(variant_hyp, ["hola mundo", "buenos dias", "hasta luego", "distinto"])
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    batch_rc = main(
+        [
+            "score-cached-batch",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--system",
+            f"baseline={FIXTURES / 'hyp.out'}",
+            "--system",
+            f"variant={variant_hyp}",
+            "--num-train",
+            "4",
+            "--json-out-dir",
+            str(output_dir),
+            "--quiet",
+        ]
+    )
+
+    assert full_rc == 0
+    assert batch_rc == 0
+    baseline = json.loads((output_dir / "baseline.json").read_text(encoding="utf-8"))
+    variant = json.loads((output_dir / "variant.json").read_text(encoding="utf-8"))
+    assert baseline["backend"]["resolved_mode"] == "cached_segments"
+    assert baseline["quality"]["tm"] == variant["quality"]["tm"]
+    assert baseline["quality"]["system"] != variant["quality"]["system"]
+
+
+def test_cli_score_cached_batch_rejects_duplicate_system_names(tmp_path: Path, capsys) -> None:
+    segments = tmp_path / "segments.jsonl"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    batch_rc = main(
+        [
+            "score-cached-batch",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--system",
+            f"same={FIXTURES / 'hyp.out'}",
+            "--system",
+            f"same={FIXTURES / 'hyp.out'}",
+            "--num-train",
+            "4",
+            "--json-out-dir",
+            str(tmp_path / "reports"),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert batch_rc == 2
+    assert "duplicate system name" in captured.err
+
+
 def test_cli_score_cached_reports_bad_segment_jsonl(tmp_path: Path, capsys) -> None:
     bad_segments = tmp_path / "bad.jsonl"
     bad_segments.write_text("{not-json}\n", encoding="utf-8")

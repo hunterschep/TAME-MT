@@ -28,6 +28,7 @@ from tame_mt.json_utils import strict_json_dumps
 from tame_mt.native import native_status
 from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
 from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
+from tame_mt.schema import TameReport
 from tame_mt.version import __version__
 
 
@@ -133,6 +134,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--quiet", action="store_true", help="suppress human-readable stdout report"
     )
     cached_parser.set_defaults(handler=run_score_cached)
+
+    cached_batch_parser = subparsers.add_parser(
+        "score-cached-batch",
+        help="score multiple hypotheses using one cached segment diagnostic file",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_config_args(cached_batch_parser)
+    cached_batch_parser.add_argument(
+        "--segment-in", required=True, help="segment JSONL from audit/score"
+    )
+    cached_batch_parser.add_argument("--ref", action="append", required=True, help="reference file")
+    cached_batch_parser.add_argument(
+        "--system",
+        action="append",
+        required=True,
+        metavar="NAME=PATH",
+        help="named system hypothesis file; repeat for multiple systems",
+    )
+    cached_batch_parser.add_argument(
+        "--num-train", type=int, required=True, help="training segment count"
+    )
+    cached_batch_parser.add_argument(
+        "--json-out-dir", required=True, help="directory for per-system JSON reports"
+    )
+    cached_batch_parser.add_argument(
+        "--quiet", action="store_true", help="suppress human-readable stdout summary"
+    )
+    cached_batch_parser.set_defaults(handler=run_score_cached_batch)
 
     index_parser = subparsers.add_parser(
         "index",
@@ -309,6 +338,25 @@ def run_score_cached(args: argparse.Namespace) -> int:
         write_json_report(args.json_out, report)
     if not args.quiet:
         print(render_text_report(report))
+    return 0
+
+
+def run_score_cached_batch(args: argparse.Namespace) -> int:
+    config = _config_from_args(args)
+    exposures, tm_results = read_segment_jsonl(args.segment_in)
+    refs = [read_lines(path) for path in args.ref]
+    systems = _read_system_specs(args.system)
+    scorer = TameScorer(config)
+    reports = scorer.score_many_from_artifacts(
+        exposures=exposures,
+        tm_results=tm_results,
+        refs=refs,
+        systems=systems,
+        num_train=args.num_train,
+    )
+    output_paths = _write_batch_reports(args.json_out_dir, reports)
+    if not args.quiet:
+        print("\n".join(f"{system_name}\t{path}" for system_name, path in output_paths.items()))
     return 0
 
 
@@ -544,3 +592,58 @@ def _parse_metrics(values: list[str]) -> tuple[str, ...]:
     for value in values:
         parsed.extend(part.strip().lower() for part in value.split(",") if part.strip())
     return tuple(dict.fromkeys(parsed))
+
+
+def _read_system_specs(specs: list[str]) -> dict[str, list[str]]:
+    systems: dict[str, list[str]] = {}
+    for spec in specs:
+        name, path = _parse_system_spec(spec)
+        if name in systems:
+            raise TameMTError(f"duplicate system name: {name}")
+        systems[name] = read_lines(path)
+    return systems
+
+
+def _parse_system_spec(spec: str) -> tuple[str, str]:
+    if "=" not in spec:
+        raise TameMTError("--system must be formatted as NAME=PATH")
+    name, path = spec.split("=", 1)
+    name = name.strip()
+    path = path.strip()
+    if not name:
+        raise TameMTError("--system name must be non-empty")
+    if not path:
+        raise TameMTError("--system path must be non-empty")
+    return name, path
+
+
+def _write_batch_reports(
+    output_dir: str,
+    reports: dict[str, TameReport],
+) -> dict[str, str]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    paths_by_system: dict[str, str] = {}
+    used_paths: dict[Path, str] = {}
+    for system_name, report in reports.items():
+        report_path = output_path / f"{_safe_report_stem(system_name)}.json"
+        previous_system = used_paths.get(report_path)
+        if previous_system is not None:
+            raise TameMTError(
+                "system names produce the same report filename: "
+                f"{previous_system!r} and {system_name!r}"
+            )
+        used_paths[report_path] = system_name
+        write_json_report(report_path, report)
+        paths_by_system[system_name] = str(report_path)
+    return paths_by_system
+
+
+def _safe_report_stem(system_name: str) -> str:
+    stem = "".join(
+        character if character.isalnum() or character in {"-", "_", "."} else "_"
+        for character in system_name.strip()
+    ).strip("._")
+    if not stem:
+        raise TameMTError(f"system name {system_name!r} does not produce a safe filename")
+    return stem

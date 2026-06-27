@@ -52,6 +52,9 @@
 - Reduced cached-scoring allocation by fast-pathing already ordered segment
   artifacts, building exposure-bin groups in one pass, and reusing whole-corpus
   SacreBLEU statistics without copying.
+- Added `score-cached-batch` and a batch artifact-scoring API so many systems
+  can share one segment-artifact read, one reference cache, and one TM baseline
+  scoring pass.
 - Reduced source-only audit and TM-baseline retrieval work by querying only the
   nearest source neighbor unless pair exposure is being computed.
 - Moved native pair-exposure reranking into a batched Rust path to reduce

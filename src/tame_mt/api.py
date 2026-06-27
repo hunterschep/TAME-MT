@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from tame_mt.artifacts import validate_segment_artifacts
-from tame_mt.bins import compute_generalization_gap, score_corpus_and_bins
+from tame_mt.bins import (
+    TM_GROUP,
+    compute_generalization_gap,
+    score_corpus_and_bins,
+    score_many_corpus_and_bins,
+)
 from tame_mt.config import ScoreConfig
 from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.exposure import compute_exposure_result, summarize_exposures
@@ -87,58 +93,89 @@ class TameScorer:
         hyp: list[str],
         num_train: int,
     ) -> TameReport:
+        return self.score_many_from_artifacts(
+            exposures=exposures,
+            tm_results=tm_results,
+            refs=refs,
+            systems={"system": hyp},
+            num_train=num_train,
+        )["system"]
+
+    def score_many_from_artifacts(
+        self,
+        exposures: list[SegmentExposure],
+        tm_results: list[SegmentTMResult],
+        refs: list[list[str]],
+        systems: Mapping[str, list[str]],
+        num_train: int,
+    ) -> dict[str, TameReport]:
         if not exposures:
             raise InputDataError("segment artifact must contain at least one segment")
         if not refs:
             raise InputDataError("refs must contain at least one reference")
+        if not systems:
+            raise InputDataError("systems must contain at least one hypothesis")
+        if TM_GROUP in systems:
+            raise InputDataError(f"system name {TM_GROUP!r} is reserved")
         if num_train <= 0:
             raise InputDataError("num_train must be positive")
         exposures, tm_results = validate_segment_artifacts(exposures, tm_results)
         tm_hyp = [result.tm_hyp for result in tm_results]
         for ref_idx, ref in enumerate(refs):
             validate_equal_lengths("segments", exposures, f"ref[{ref_idx}]", ref)
-        validate_equal_lengths("segments", exposures, "hyp", hyp)
+        for system_name, hyp in systems.items():
+            if not system_name:
+                raise InputDataError("system names must be non-empty")
+            validate_equal_lengths("segments", exposures, f"hyp[{system_name}]", hyp)
         validate_equal_lengths("segments", exposures, "tm_hyp", tm_hyp)
 
-        scored_bins = score_corpus_and_bins(hyp, tm_hyp, refs, exposures, self.config)
-        system_scores = scored_bins.system_scores
-        tm_scores = scored_bins.tm_scores
-        deltas = delta_scores(system_scores, tm_scores, self.config.metrics)
-        bin_reports = scored_bins.bin_reports
-        gen_gap = compute_generalization_gap(bin_reports, self.config.metrics)
         exposure_summary = summarize_exposures(exposures, self.config)
-        warnings = generate_warnings(
-            exposure=exposure_summary,
-            system_scores=system_scores,
-            tm_scores=tm_scores,
-            bin_reports=bin_reports,
-            generalization_gap=gen_gap,
-            config=self.config,
-            num_test=len(exposures),
+        scored_bins = score_many_corpus_and_bins(
+            systems,
+            tm_hyp,
+            refs,
+            exposures,
+            self.config,
         )
-        return TameReport(
-            tame_version=__version__,
-            signature=build_signature(self.config, backend_name="cached_segments"),
-            num_train=num_train,
-            num_test=len(exposures),
-            num_refs=len(refs),
-            config=config_to_dict(self.config),
-            backend={
-                "name": "cached_segments",
-                "native": False,
-                "exact": False,
-                "requested_mode": self.config.index.mode,
-                "resolved_mode": "cached_segments",
-                "index_reused": True,
-            },
-            system_scores=system_scores,
-            tm_scores=tm_scores,
-            delta_scores=deltas,
-            exposure=exposure_summary,
-            bins=bin_reports,
-            generalization_gap=gen_gap,
-            warnings=warnings,
-        )
+        reports: dict[str, TameReport] = {}
+        for system_name, system_scores in scored_bins.system_scores.items():
+            tm_scores = scored_bins.tm_scores
+            deltas = delta_scores(system_scores, tm_scores, self.config.metrics)
+            bin_reports = scored_bins.bin_reports[system_name]
+            gen_gap = compute_generalization_gap(bin_reports, self.config.metrics)
+            warnings = generate_warnings(
+                exposure=exposure_summary,
+                system_scores=system_scores,
+                tm_scores=tm_scores,
+                bin_reports=bin_reports,
+                generalization_gap=gen_gap,
+                config=self.config,
+                num_test=len(exposures),
+            )
+            reports[system_name] = TameReport(
+                tame_version=__version__,
+                signature=build_signature(self.config, backend_name="cached_segments"),
+                num_train=num_train,
+                num_test=len(exposures),
+                num_refs=len(refs),
+                config=config_to_dict(self.config),
+                backend={
+                    "name": "cached_segments",
+                    "native": False,
+                    "exact": False,
+                    "requested_mode": self.config.index.mode,
+                    "resolved_mode": "cached_segments",
+                    "index_reused": True,
+                },
+                system_scores=system_scores,
+                tm_scores=tm_scores,
+                delta_scores=deltas,
+                exposure=exposure_summary,
+                bins=bin_reports,
+                generalization_gap=gen_gap,
+                warnings=warnings,
+            )
+        return reports
 
     def evaluate_index_bundle(
         self,

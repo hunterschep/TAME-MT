@@ -106,9 +106,24 @@ tame-mt score-cached \
   --json-out system.tame.json
 ```
 
+For many systems, score them in one process so references, segment artifacts,
+and TM baseline scores are reused:
+
+```bash
+tame-mt score-cached-batch \
+  --segment-in segments.jsonl \
+  --ref test.ref \
+  --system system_a=system_a.out \
+  --system system_b=system_b.out \
+  --num-train 125000 \
+  --json-out-dir tame_reports
+```
+
 `score-cached` reuses source/target/pair exposure and TM hypotheses from the
 segment JSONL file. It recomputes only system metrics, TM metrics, delta over
 TM, bin scores, warnings, and the final report.
+`score-cached-batch` does the same work for multiple systems while reading and
+validating the segment JSONL once and computing the TM baseline once.
 
 Segment rows are validated before scoring. Indices must be unique and
 contiguous from `0` to `N-1`; valid rows may appear in any order and are sorted
