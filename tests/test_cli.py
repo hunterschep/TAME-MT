@@ -518,3 +518,38 @@ def test_cli_rejects_non_finite_thresholds(tmp_path: Path, capsys) -> None:
     assert rc == 2
     assert "finite number" in captured.err
     assert not json_out.exists()
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "expected_error"),
+    [
+        (["--far-threshold", "1.01"], "far_threshold must be between 0 and 1"),
+        (["--near-threshold", "1.01"], "near_threshold must be between 0 and 1"),
+        (["--leak-thresholds", "0.7,1.01"], "leak_thresholds must be between 0 and 1"),
+        (["--leak-thresholds", ","], "expected a comma-separated list of floats"),
+        (["--ngram-orders", "3,,5"], "expected a comma-separated list of integers"),
+    ],
+)
+def test_cli_rejects_malformed_numeric_configuration(
+    extra_args: list[str], expected_error: str, capsys
+) -> None:
+    rc = main(
+        [
+            "score",
+            *extra_args,
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert expected_error in captured.err

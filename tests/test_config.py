@@ -1,7 +1,7 @@
 import pytest
 
 from tame_mt import BinConfig, IndexConfig, ScoreConfig, SimilarityConfig, TMConfig
-from tame_mt.config import parse_float_tuple
+from tame_mt.config import parse_float_tuple, parse_int_tuple
 from tame_mt.exceptions import ConfigurationError
 
 
@@ -23,11 +23,28 @@ def test_config_rejects_invalid_thresholds() -> None:
         BinConfig(near_threshold=float("inf"))
     with pytest.raises(ConfigurationError, match="finite"):
         BinConfig(leak_thresholds=(0.7, float("-inf")))
+    with pytest.raises(ConfigurationError, match="far_threshold"):
+        BinConfig(far_threshold=1.01, near_threshold=1.0)
+    with pytest.raises(ConfigurationError, match="near_threshold"):
+        BinConfig(near_threshold=1.01)
+    with pytest.raises(ConfigurationError, match="leak_thresholds"):
+        BinConfig(leak_thresholds=(0.7, 1.01))
+    with pytest.raises(ConfigurationError, match="leak_thresholds"):
+        BinConfig(leak_thresholds=())
 
 
 def test_parse_float_tuple_rejects_non_finite_values() -> None:
     with pytest.raises(ConfigurationError, match="finite"):
         parse_float_tuple("0.70,nan")
+
+
+def test_tuple_parsers_reject_empty_components() -> None:
+    with pytest.raises(ConfigurationError, match="comma-separated list of floats"):
+        parse_float_tuple(",")
+    with pytest.raises(ConfigurationError, match="comma-separated list of floats"):
+        parse_float_tuple("0.70,,0.85")
+    with pytest.raises(ConfigurationError, match="comma-separated list of integers"):
+        parse_int_tuple("3,,5")
 
 
 def test_config_rejects_invalid_index_and_tm_options() -> None:

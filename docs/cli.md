@@ -144,7 +144,9 @@ ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 
 Numeric options must be finite decimal values. `nan`, `inf`, and `-inf` are
 rejected because TAME-MT JSON outputs are strict JSON and never emit
-non-standard floating-point tokens.
+non-standard floating-point tokens. Exposure thresholds are fractions in the
+closed interval \([0, 1]\), and comma-separated numeric lists must not contain
+empty items.
 
 ## Doctor
 

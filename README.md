@@ -436,6 +436,10 @@ Common options:
 --chrf-word-order 2
 ```
 
+Numeric options must be finite decimal values. Exposure thresholds are
+fractions in the closed interval \([0, 1]\), so values such as `1.2`, `nan`,
+`inf`, and empty comma-list items such as `0.70,,0.85` are rejected.
+
 Segment reports do not include raw text by default. Use these only when it is
 safe to write the data:
 

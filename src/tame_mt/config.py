@@ -82,16 +82,14 @@ class BinConfig:
     min_bin_size_warning: int = 30
 
     def __post_init__(self) -> None:
-        _require_finite("far_threshold", self.far_threshold)
-        _require_finite("near_threshold", self.near_threshold)
+        _require_unit_interval("far_threshold", self.far_threshold)
+        _require_unit_interval("near_threshold", self.near_threshold)
+        if not self.leak_thresholds:
+            raise ConfigurationError("leak_thresholds must contain at least one threshold")
         for threshold in self.leak_thresholds:
-            _require_finite("leak_thresholds", threshold)
-        if self.far_threshold < 0 or self.near_threshold < 0:
-            raise ConfigurationError("bin thresholds must be non-negative")
+            _require_unit_interval("leak_thresholds", threshold)
         if self.far_threshold > self.near_threshold:
             raise ConfigurationError("far_threshold must be no larger than near_threshold")
-        if any(threshold < 0 for threshold in self.leak_thresholds):
-            raise ConfigurationError("leak thresholds must be non-negative")
         if self.min_bin_size_warning < 0:
             raise ConfigurationError("min_bin_size_warning must be non-negative")
 
@@ -139,8 +137,11 @@ class ScoreConfig:
 def parse_float_tuple(value: str) -> tuple[float, ...]:
     if not value:
         raise ConfigurationError("expected a comma-separated list of floats")
+    parts = tuple(part.strip() for part in value.split(","))
+    if any(part == "" for part in parts):
+        raise ConfigurationError("expected a comma-separated list of floats")
     try:
-        parsed = tuple(float(part.strip()) for part in value.split(",") if part.strip())
+        parsed = tuple(float(part) for part in parts)
     except ValueError as exc:
         raise ConfigurationError(f"invalid float list: {value!r}") from exc
     for item in parsed:
@@ -151,8 +152,11 @@ def parse_float_tuple(value: str) -> tuple[float, ...]:
 def parse_int_tuple(value: str) -> tuple[int, ...]:
     if not value:
         raise ConfigurationError("expected a comma-separated list of integers")
+    parts = tuple(part.strip() for part in value.split(","))
+    if any(part == "" for part in parts):
+        raise ConfigurationError("expected a comma-separated list of integers")
     try:
-        parsed = tuple(int(part.strip()) for part in value.split(",") if part.strip())
+        parsed = tuple(int(part) for part in parts)
     except ValueError as exc:
         raise ConfigurationError(f"invalid integer list: {value!r}") from exc
     if not parsed or any(order <= 0 for order in parsed):
@@ -163,3 +167,9 @@ def parse_int_tuple(value: str) -> tuple[int, ...]:
 def _require_finite(name: str, value: float) -> None:
     if not isfinite(value):
         raise ConfigurationError(f"{name} must be a finite number")
+
+
+def _require_unit_interval(name: str, value: float) -> None:
+    _require_finite(name, value)
+    if value < 0 or value > 1:
+        raise ConfigurationError(f"{name} must be between 0 and 1")

@@ -39,6 +39,8 @@
 - Rejected non-finite numeric config and cached-artifact values and made JSON
   report/segment writers fail closed instead of emitting non-standard `NaN` or
   infinity values.
+- Rejected out-of-range exposure thresholds and malformed comma-separated
+  numeric CLI lists so large batch runs fail fast on invalid configuration.
 - Centralized strict JSON parsing/serialization for package artifacts so
   cached segment JSONL and `.tameidx` manifests reject non-standard `NaN` and
   infinity constants and duplicate object keys even in ignored fields.
