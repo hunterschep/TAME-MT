@@ -53,3 +53,8 @@ jobs:
         run: python -m build
       - name: Check distributions
         run: python -m twine check dist/*
+      - name: Smoke installed wheel
+        run: |
+          python -m venv /tmp/tame-wheel-smoke
+          /tmp/tame-wheel-smoke/bin/python -m pip install dist/*.whl
+          /tmp/tame-wheel-smoke/bin/python scripts/wheel_smoke.py

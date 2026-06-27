@@ -8,6 +8,8 @@ on:
       - "Cargo.lock"
       - "pyproject.toml"
       - "src/**"
+      - "scripts/wheel_smoke.py"
+      - "tests/fixtures/**"
       - ".github/workflows/wheels.yml"
 
 jobs:

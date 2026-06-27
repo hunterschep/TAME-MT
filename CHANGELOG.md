@@ -50,6 +50,8 @@
 - Replaced inline wheel smoke tests with a cross-platform script covering gzip
   IO, index reuse, cached scoring, and TM metadata outputs.
 - Added clean-venv built-wheel smoke testing to the acceptance script.
+- Added built-wheel smoke testing to package CI and ensured wheel CI reruns when
+  smoke fixtures or the smoke script change.
 - Added `tame-mt doctor` for install/backend diagnostics.
 - Added OPUS-100 public-corpus demo outputs and local performance notes for the
   50k-train/2k-test benchmark scale.
