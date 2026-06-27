@@ -135,6 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
     cached_parser.add_argument(
         "--quiet", action="store_true", help="suppress human-readable stdout report"
     )
+    cached_parser.add_argument(
+        "--verbose", action="store_true", help="write stage timing details to stderr"
+    )
     cached_parser.set_defaults(handler=run_score_cached)
 
     cached_batch_parser = subparsers.add_parser(
@@ -163,6 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
     cached_batch_parser.add_argument(
         "--quiet", action="store_true", help="suppress human-readable stdout summary"
     )
+    cached_batch_parser.add_argument(
+        "--verbose", action="store_true", help="write stage timing details to stderr"
+    )
     cached_batch_parser.set_defaults(handler=run_score_cached_batch)
 
     index_parser = subparsers.add_parser(
@@ -182,6 +188,9 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser.add_argument("--out", required=True, help="write index bundle")
     index_build_parser.add_argument(
         "--quiet", action="store_true", help="suppress index-build summary"
+    )
+    index_build_parser.add_argument(
+        "--verbose", action="store_true", help="write stage timing details to stderr"
     )
     index_build_parser.set_defaults(handler=run_index_build)
 
@@ -206,6 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", required=True, help="write translation-memory baseline hypotheses"
     )
     tm_parser.add_argument("--metadata-out", help="write JSONL nearest-neighbor metadata")
+    tm_parser.add_argument(
+        "--verbose", action="store_true", help="write stage timing details to stderr"
+    )
     tm_parser.set_defaults(handler=run_tm_baseline)
     return parser
 
@@ -337,19 +349,22 @@ def run_audit(args: argparse.Namespace) -> int:
 
 def run_score_cached(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    exposures, tm_results = read_segment_jsonl(args.segment_in)
-    refs = [read_lines(path) for path in args.ref]
-    hyp = read_lines(args.hyp)
+    with _timed_step(args, "read cached inputs"):
+        exposures, tm_results = read_segment_jsonl(args.segment_in)
+        refs = [read_lines(path) for path in args.ref]
+        hyp = read_lines(args.hyp)
     scorer = TameScorer(config)
-    report = scorer.score_from_artifacts(
-        exposures=exposures,
-        tm_results=tm_results,
-        refs=refs,
-        hyp=hyp,
-        num_train=args.num_train,
-    )
-    if args.json_out:
-        write_json_report(args.json_out, report)
+    with _timed_step(args, "score cached hypothesis"):
+        report = scorer.score_from_artifacts(
+            exposures=exposures,
+            tm_results=tm_results,
+            refs=refs,
+            hyp=hyp,
+            num_train=args.num_train,
+        )
+    with _timed_step(args, "write outputs"):
+        if args.json_out:
+            write_json_report(args.json_out, report)
     if not args.quiet:
         print(render_text_report(report))
     return 0
@@ -357,18 +372,21 @@ def run_score_cached(args: argparse.Namespace) -> int:
 
 def run_score_cached_batch(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    exposures, tm_results = read_segment_jsonl(args.segment_in)
-    refs = [read_lines(path) for path in args.ref]
-    systems = _read_system_specs(args.system)
+    with _timed_step(args, "read cached inputs"):
+        exposures, tm_results = read_segment_jsonl(args.segment_in)
+        refs = [read_lines(path) for path in args.ref]
+        systems = _read_system_specs(args.system)
     scorer = TameScorer(config)
-    reports = scorer.score_many_from_artifacts(
-        exposures=exposures,
-        tm_results=tm_results,
-        refs=refs,
-        systems=systems,
-        num_train=args.num_train,
-    )
-    output_paths = _write_batch_reports(args.json_out_dir, reports)
+    with _timed_step(args, "score cached systems"):
+        reports = scorer.score_many_from_artifacts(
+            exposures=exposures,
+            tm_results=tm_results,
+            refs=refs,
+            systems=systems,
+            num_train=args.num_train,
+        )
+    with _timed_step(args, "write outputs"):
+        output_paths = _write_batch_reports(args.json_out_dir, reports)
     if not args.quiet:
         print("\n".join(f"{system_name}\t{path}" for system_name, path in output_paths.items()))
     return 0
@@ -376,9 +394,11 @@ def run_score_cached_batch(args: argparse.Namespace) -> int:
 
 def run_index_build(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    train_src = read_lines(args.train_src)
-    train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
-    bundle = save_index_bundle(args.out, train_src, train_tgt, config)
+    with _timed_step(args, "read training inputs"):
+        train_src = read_lines(args.train_src)
+        train_tgt = read_lines(args.train_tgt) if args.train_tgt else None
+    with _timed_step(args, "build index bundle"):
+        bundle = save_index_bundle(args.out, train_src, train_tgt, config)
     if not args.quiet:
         print(
             "\n".join(
@@ -407,29 +427,32 @@ def run_index_inspect(args: argparse.Namespace) -> int:
 
 def run_tm_baseline(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
-    train_src = read_lines(args.train_src)
-    train_tgt = read_lines(args.train_tgt)
-    test_src = read_lines(args.test_src)
+    with _timed_step(args, "read inputs"):
+        train_src = read_lines(args.train_src)
+        train_tgt = read_lines(args.train_tgt)
+        test_src = read_lines(args.test_src)
 
     scorer = TameScorer(config)
-    result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs=None, hyp=None)
-    write_lines(args.out, result.tm_hyp)
-    if args.metadata_out:
-        metadata_path = Path(args.metadata_out)
-        ensure_parent_dir(metadata_path)
-        with open_text(metadata_path, "w") as handle:
-            for item in result.tm_results:
-                handle.write(
-                    strict_json_dumps(
-                        {
-                            "index": item.index,
-                            "tm_source_index": item.tm_source_index,
-                            "tm_source_similarity": item.tm_source_similarity,
-                        },
-                        ensure_ascii=False,
+    with _timed_step(args, "evaluate tm baseline"):
+        result = scorer.evaluate_corpus(train_src, train_tgt, test_src, refs=None, hyp=None)
+    with _timed_step(args, "write outputs"):
+        write_lines(args.out, result.tm_hyp)
+        if args.metadata_out:
+            metadata_path = Path(args.metadata_out)
+            ensure_parent_dir(metadata_path)
+            with open_text(metadata_path, "w") as handle:
+                for item in result.tm_results:
+                    handle.write(
+                        strict_json_dumps(
+                            {
+                                "index": item.index,
+                                "tm_source_index": item.tm_source_index,
+                                "tm_source_similarity": item.tm_source_similarity,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
     return 0
 
 

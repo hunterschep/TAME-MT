@@ -9,6 +9,8 @@
   prior segment diagnostics.
 - Added real `score --verbose` and `audit --verbose` stage timing output to
   stderr for long-running jobs.
+- Extended verbose stage timing to cached scoring, cached batch scoring, index
+  building, and TM-baseline generation.
 - Added a native Rust/PyO3 nearest-neighbor backend with exact and bounded fast
   retrieval modes, compact integer n-gram indexes, parallel batch query, bulk
   candidate scoring, and pure-Python fallback modes.

@@ -164,9 +164,9 @@ non-standard floating-point tokens. Exposure thresholds are fractions in the
 closed interval \([0, 1]\), and comma-separated numeric lists must not contain
 empty items.
 
-`score --verbose` and `audit --verbose` write stage timings to stderr for input
-reading, index loading when used, corpus evaluation, and output writing. This
-does not change the report written to stdout.
+Long-running commands support `--verbose`, which writes stage timings to
+stderr without changing report output. This covers `score`, `audit`,
+`score-cached`, `score-cached-batch`, `index build`, and `tm-baseline`.
 
 ## Doctor
 

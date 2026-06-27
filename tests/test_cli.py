@@ -201,6 +201,31 @@ def test_cli_tm_baseline_supports_gzip_outputs(tmp_path: Path) -> None:
     assert {"index", "tm_source_index", "tm_source_similarity"} <= set(metadata_rows[0])
 
 
+def test_cli_tm_baseline_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
+    out = tmp_path / "tm.out"
+    rc = main(
+        [
+            "tm-baseline",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--out",
+            str(out),
+            "--verbose",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert captured.out == ""
+    assert "tame-mt: read inputs completed in " in captured.err
+    assert "tame-mt: evaluate tm baseline completed in " in captured.err
+    assert "tame-mt: write outputs completed in " in captured.err
+
+
 def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
     full_json = tmp_path / "full.json"
     cached_json = tmp_path / "cached.json"
@@ -247,6 +272,54 @@ def test_cli_score_cached_matches_full_score(tmp_path: Path) -> None:
     cached = json.loads(cached_json.read_text(encoding="utf-8"))
     assert cached["quality"] == full["quality"]
     assert cached["exposure"] == full["exposure"]
+
+
+def test_cli_score_cached_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
+    cached_json = tmp_path / "cached.json"
+    segments = tmp_path / "segments.jsonl"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--json-out",
+            str(cached_json),
+            "--quiet",
+            "--verbose",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert cached_rc == 0
+    assert captured.out == ""
+    assert "tame-mt: read cached inputs completed in " in captured.err
+    assert "tame-mt: score cached hypothesis completed in " in captured.err
+    assert "tame-mt: write outputs completed in " in captured.err
 
 
 def test_cli_score_cached_batch_writes_per_system_reports(tmp_path: Path) -> None:
@@ -298,6 +371,61 @@ def test_cli_score_cached_batch_writes_per_system_reports(tmp_path: Path) -> Non
     assert baseline["backend"]["resolved_mode"] == "cached_segments"
     assert baseline["quality"]["tm"] == variant["quality"]["tm"]
     assert baseline["quality"]["system"] != variant["quality"]["system"]
+
+
+def test_cli_score_cached_batch_verbose_reports_stage_timings(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    segments = tmp_path / "segments.jsonl"
+    output_dir = tmp_path / "reports"
+    variant_hyp = tmp_path / "variant.out"
+    write_lines(variant_hyp, ["hola mundo", "buenos dias", "hasta luego", "distinto"])
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    batch_rc = main(
+        [
+            "score-cached-batch",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--system",
+            f"baseline={FIXTURES / 'hyp.out'}",
+            "--system",
+            f"variant={variant_hyp}",
+            "--num-train",
+            "4",
+            "--json-out-dir",
+            str(output_dir),
+            "--quiet",
+            "--verbose",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert batch_rc == 0
+    assert captured.out == ""
+    assert "tame-mt: read cached inputs completed in " in captured.err
+    assert "tame-mt: score cached systems completed in " in captured.err
+    assert "tame-mt: write outputs completed in " in captured.err
 
 
 def test_cli_score_cached_batch_rejects_duplicate_system_names(tmp_path: Path, capsys) -> None:
@@ -407,10 +535,12 @@ def test_cli_index_build_inspect_and_score_reuse(tmp_path: Path, capsys) -> None
             "--out",
             str(index_path),
             "--quiet",
+            "--verbose",
         ]
     )
     inspect_rc = main(["index", "inspect", str(index_path)])
-    inspect_out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    inspect_out = captured.out
     full_rc = main(
         [
             "score",
@@ -452,6 +582,8 @@ def test_cli_index_build_inspect_and_score_reuse(tmp_path: Path, capsys) -> None
 
     assert build_rc == 0
     assert inspect_rc == 0
+    assert "tame-mt: read training inputs completed in " in captured.err
+    assert "tame-mt: build index bundle completed in " in captured.err
     assert json.loads(inspect_out)["format"] == "tameidx"
     assert full_rc == 0
     assert indexed_rc == 0
