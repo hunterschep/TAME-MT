@@ -73,6 +73,8 @@
   services and notebooks can validate cached diagnostics once, keep SacreBLEU
   reference caches and TM baseline scores alive, and score later hypotheses with
   prepared cached-score latency.
+- Made prepared cached scorers snapshot validated segment diagnostics so later
+  caller-side mutation of artifact objects cannot corrupt cached state.
 - Exposed cached-scoring artifact types, `read_segment_jsonl`, and
   `MetricConfig` from the top-level Python package API.
 - Reduced source-only audit and TM-baseline retrieval work by querying only the

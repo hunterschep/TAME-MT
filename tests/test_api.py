@@ -138,9 +138,6 @@ def test_prepare_from_artifacts_reuses_cached_setup_for_later_systems() -> None:
         refs=refs,
         num_train=2,
     )
-    refs[0][0] = "mutated after prepare"
-
-    prepared_report = cached.score(["good", "bad"])
     direct_report = scorer.score_from_artifacts(
         exposures=exposures,
         tm_results=tm_results,
@@ -148,6 +145,11 @@ def test_prepare_from_artifacts_reuses_cached_setup_for_later_systems() -> None:
         hyp=["good", "bad"],
         num_train=2,
     )
+    refs[0][0] = "mutated after prepare"
+    exposures[0].source_exposure = 0.0
+    tm_results[0].tm_hyp = "mutated after prepare"
+
+    prepared_report = cached.score(["good", "bad"])
     batch_reports = cached.score_many(
         {
             "baseline": ["good", "bad"],

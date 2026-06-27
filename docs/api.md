@@ -167,9 +167,10 @@ later_reports = cached.score_many(
 )
 ```
 
-The prepared scorer owns a validated snapshot of the references, exposure bins,
-SacreBLEU reference caches, and TM baseline scores. Later `score()` and
-`score_many()` calls only score the supplied system hypotheses.
+The prepared scorer owns a validated snapshot of the segment diagnostics,
+references, exposure bins, SacreBLEU reference caches, and TM baseline scores.
+Mutating the original artifact/reference lists after preparation does not
+change later `score()` or `score_many()` calls.
 
 Artifact indices are validated and canonicalized before scoring. They must be
 unique and contiguous from `0` to `N-1`; valid rows may be supplied out of order.

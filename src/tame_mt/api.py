@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from tame_mt.artifacts import validate_segment_artifacts
 from tame_mt.bins import (
@@ -56,7 +56,12 @@ class CachedSegmentScorer:
 
         self.config = config
         self.num_train = num_train
-        self.exposures, self.tm_results = validate_segment_artifacts(exposures, tm_results)
+        validated_exposures, validated_tm_results = validate_segment_artifacts(
+            exposures,
+            tm_results,
+        )
+        self.exposures = [replace(segment) for segment in validated_exposures]
+        self.tm_results = [replace(result) for result in validated_tm_results]
         self.refs = [list(ref) for ref in refs]
         self.tm_hyp = [result.tm_hyp for result in self.tm_results]
         for ref_idx, ref in enumerate(self.refs):
