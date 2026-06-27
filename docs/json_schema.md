@@ -131,6 +131,14 @@ Raw text fields are opt-in:
 Use `.json.gz` or `.jsonl.gz` output paths to write gzip-compressed UTF-8 JSON
 reports or segment diagnostics.
 
+When `--segment-out segments.jsonl` is used, TAME-MT also writes
+`segments.jsonl.meta.json`. The sidecar records the artifact type, TAME-MT
+version, report signature, train/test/reference counts, config, and backend
+used to create the segment diagnostics. `score-cached` and
+`score-cached-batch` validate this sidecar when it is present. Segment JSONL
+files created by older TAME-MT versions without a sidecar remain readable, but
+they cannot be checked for full config drift.
+
 Consumers should treat `index` as the authoritative original segment position.
 `score-cached` requires indices to be unique and contiguous from `0` to `N-1`
 and sorts valid rows by index before scoring. `--num-train` must be the positive

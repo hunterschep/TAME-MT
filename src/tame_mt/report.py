@@ -11,6 +11,8 @@ from tame_mt.json_utils import strict_json_dumps
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.version import __version__
 
+SEGMENT_METADATA_SUFFIX = ".meta.json"
+
 
 def build_signature(config: ScoreConfig, backend_name: str | None = None) -> str:
     norm = _normalization_signature(config)
@@ -103,6 +105,21 @@ def write_json_report(path: str | Path, report: TameReport) -> None:
         handle.write(payload)
 
 
+def segment_metadata_path(path: str | Path) -> Path:
+    return Path(f"{path}{SEGMENT_METADATA_SUFFIX}")
+
+
+def write_segment_metadata(path: str | Path, report: TameReport) -> None:
+    output_path = Path(path)
+    try:
+        payload = strict_json_dumps(_segment_metadata_payload(report), ensure_ascii=False, indent=2)
+    except ValueError as exc:
+        raise OutputError(f"failed to serialize segment metadata: {exc}") from exc
+    ensure_parent_dir(output_path)
+    with open_text(output_path, "w") as handle:
+        handle.write(payload + "\n")
+
+
 def write_segment_jsonl(
     path: str | Path,
     exposures: list[SegmentExposure],
@@ -162,6 +179,22 @@ def write_segment_jsonl(
                     f"failed to serialize segment JSONL row {segment.index}: {exc}"
                 ) from exc
             handle.write(line + "\n")
+
+
+def _segment_metadata_payload(report: TameReport) -> dict[str, Any]:
+    return {
+        "schema_version": "0.1",
+        "artifact": "segment_jsonl",
+        "tame_version": report.tame_version,
+        "signature": report.signature,
+        "data": {
+            "num_train": report.num_train,
+            "num_test": report.num_test,
+            "num_refs": report.num_refs,
+        },
+        "config": report.config,
+        "backend": report.backend,
+    }
 
 
 def _normalization_signature(config: ScoreConfig) -> str:

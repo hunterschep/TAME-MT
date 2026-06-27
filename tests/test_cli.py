@@ -5,6 +5,7 @@ import pytest
 
 from tame_mt.cli import main
 from tame_mt.io import read_lines, write_lines
+from tame_mt.report import segment_metadata_path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -40,8 +41,12 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
     assert payload["data"]["num_test"] == 4
     assert "bleu" in payload["quality"]["system"]
     segment_lines = segment_out.read_text(encoding="utf-8").splitlines()
+    metadata = json.loads(segment_metadata_path(segment_out).read_text(encoding="utf-8"))
     assert len(segment_lines) == 4
     assert json.loads(segment_lines[0])["source_exact"] is True
+    assert metadata["artifact"] == "segment_jsonl"
+    assert metadata["signature"] == payload["signature"]
+    assert metadata["data"]["num_test"] == 4
 
 
 def test_cli_score_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
@@ -146,6 +151,7 @@ def test_cli_score_supports_gzip_text_inputs_and_outputs(tmp_path: Path) -> None
     payload = json.loads("\n".join(read_lines(json_out)))
     assert payload["data"]["num_test"] == 4
     assert len(read_lines(segment_out)) == 4
+    assert segment_metadata_path(segment_out).exists()
 
 
 def test_cli_doctor_reports_environment(capsys) -> None:
@@ -319,8 +325,100 @@ def test_cli_score_cached_rejects_bin_threshold_mismatch(
 
     assert full_rc == 0
     assert cached_rc == 2
-    assert "cached segment bin mismatch" in captured.err
+    assert "segment metadata bins.near_threshold does not match" in captured.err
     assert not json_out.exists()
+
+
+def test_cli_score_cached_rejects_segment_metadata_config_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    segments = tmp_path / "segments.jsonl"
+    json_out = tmp_path / "cached.json"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--lowercase",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert cached_rc == 2
+    assert "segment metadata normalization config does not match" in captured.err
+    assert not json_out.exists()
+
+
+def test_cli_score_cached_accepts_legacy_segments_without_metadata(tmp_path: Path) -> None:
+    segments = tmp_path / "segments.jsonl"
+    cached_json = tmp_path / "cached.json"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    segment_metadata_path(segments).unlink()
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--json-out",
+            str(cached_json),
+            "--quiet",
+        ]
+    )
+
+    assert full_rc == 0
+    assert cached_rc == 0
+    assert cached_json.exists()
 
 
 def test_cli_score_cached_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:

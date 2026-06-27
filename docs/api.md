@@ -179,6 +179,11 @@ and prepared cached scorers verify that each stored bin still matches the
 current `ScoreConfig.bins`; if you change `far_threshold` or `near_threshold`,
 rerun the audit or score cached artifacts with the original bin settings.
 
+The CLI writes a `.meta.json` sidecar next to new segment JSONL outputs and
+validates it on cached CLI runs. The low-level Python artifact API accepts
+in-memory segment rows directly, so callers that bypass the CLI should keep the
+`ScoreConfig` used to generate the artifacts with the artifact store.
+
 ## Custom Configuration
 
 ```python

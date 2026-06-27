@@ -12,7 +12,7 @@ from typing import cast
 import sacrebleu
 
 from tame_mt.api import TameScorer
-from tame_mt.artifacts import read_segment_jsonl
+from tame_mt.artifacts import read_segment_jsonl, read_segment_metadata, validate_segment_metadata
 from tame_mt.config import (
     BinConfig,
     IndexConfig,
@@ -29,7 +29,13 @@ from tame_mt.io import ensure_parent_dir, open_text, read_lines, write_lines
 from tame_mt.json_utils import strict_json_dumps
 from tame_mt.native import native_status
 from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
-from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
+from tame_mt.report import (
+    render_text_report,
+    segment_metadata_path,
+    write_json_report,
+    write_segment_jsonl,
+    write_segment_metadata,
+)
 from tame_mt.schema import TameReport
 from tame_mt.version import __version__
 
@@ -297,6 +303,7 @@ def run_score(args: argparse.Namespace) -> int:
                 include_reference_text=args.include_reference_text,
                 include_hyp_text=args.include_hyp_text,
             )
+            write_segment_metadata(segment_metadata_path(args.segment_out), result.report)
     if not args.quiet:
         print(render_text_report(result.report))
     return 0
@@ -342,6 +349,7 @@ def run_audit(args: argparse.Namespace) -> int:
                 include_reference_text=args.include_reference_text,
                 include_hyp_text=False,
             )
+            write_segment_metadata(segment_metadata_path(args.segment_out), result.report)
     if not args.quiet:
         print(render_text_report(result.report))
     return 0
@@ -349,10 +357,20 @@ def run_audit(args: argparse.Namespace) -> int:
 
 def run_score_cached(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
+    _validate_num_train_arg(args.num_train)
     with _timed_step(args, "read cached inputs"):
         exposures, tm_results = read_segment_jsonl(args.segment_in)
+        metadata = read_segment_metadata(args.segment_in)
         refs = [read_lines(path) for path in args.ref]
         hyp = read_lines(args.hyp)
+        if metadata is not None:
+            validate_segment_metadata(
+                metadata,
+                config=config,
+                num_train=args.num_train,
+                num_test=len(exposures),
+                num_refs=len(refs),
+            )
     scorer = TameScorer(config)
     with _timed_step(args, "score cached hypothesis"):
         report = scorer.score_from_artifacts(
@@ -372,10 +390,20 @@ def run_score_cached(args: argparse.Namespace) -> int:
 
 def run_score_cached_batch(args: argparse.Namespace) -> int:
     config = _config_from_args(args)
+    _validate_num_train_arg(args.num_train)
     with _timed_step(args, "read cached inputs"):
         exposures, tm_results = read_segment_jsonl(args.segment_in)
+        metadata = read_segment_metadata(args.segment_in)
         refs = [read_lines(path) for path in args.ref]
         systems = _read_system_specs(args.system)
+        if metadata is not None:
+            validate_segment_metadata(
+                metadata,
+                config=config,
+                num_train=args.num_train,
+                num_test=len(exposures),
+                num_refs=len(refs),
+            )
     scorer = TameScorer(config)
     with _timed_step(args, "score cached systems"):
         reports = scorer.score_many_from_artifacts(
@@ -646,6 +674,11 @@ def _required_arg(args: argparse.Namespace, attr: str, flag: str) -> str:
     if value is None:
         raise TameMTError(f"{flag} is required unless --index is provided")
     return str(value)
+
+
+def _validate_num_train_arg(num_train: int) -> None:
+    if num_train <= 0:
+        raise TameMTError("num_train must be positive")
 
 
 def _parse_metrics(values: list[str]) -> tuple[str, ...]:

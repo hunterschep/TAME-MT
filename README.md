@@ -128,7 +128,10 @@ tame-mt score-cached-batch \
 of new hypotheses close to ordinary BLEU/chrF scoring cost after the first
 audit. When evaluating many systems, `score-cached-batch` reads and validates
 the cached segment diagnostics once and computes the TM baseline once for the
-whole batch.
+whole batch. New segment JSONL outputs are accompanied by a
+`segments.jsonl.meta.json` sidecar, and cached CLI commands validate it when
+present so changed normalization, retrieval, TM-zero, count, or bin settings do
+not silently produce a mixed-configuration report.
 
 Python services and notebooks can go one step further with
 `TameScorer.prepare_from_artifacts()`: validate the cached diagnostics once,

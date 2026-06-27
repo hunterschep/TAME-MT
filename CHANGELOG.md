@@ -53,6 +53,9 @@
 - Rejected cached segment artifacts whose stored exposure-bin labels do not
   match the current bin thresholds, preventing mixed-configuration cached
   reports.
+- Added automatic segment JSONL metadata sidecars and cached-CLI validation for
+  artifact-defining config and count drift while preserving legacy sidecar-free
+  segment JSONL compatibility.
 - Added `target_ref_index` and `pair_ref_index` to segment diagnostics so
   multi-reference audits show which reference produced the target and pair
   exposure maxima; older cached JSONL files without those fields remain valid.

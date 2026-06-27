@@ -4,13 +4,16 @@ from math import isfinite
 from pathlib import Path
 from typing import Any, TypeVar
 
-from tame_mt.exceptions import InputDataError
+from tame_mt.config import ScoreConfig
+from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.io import open_text
 from tame_mt.json_utils import strict_json_loads
+from tame_mt.report import SEGMENT_METADATA_SUFFIX, config_to_dict
 from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 SegmentRow = TypeVar("SegmentRow", SegmentExposure, SegmentTMResult)
 VALID_SEGMENT_BINS = frozenset({"source_exact", "near", "medium", "far"})
+SEGMENT_METADATA_SCHEMA_VERSION = "0.1"
 
 
 def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[SegmentTMResult]]:
@@ -35,6 +38,79 @@ def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[Se
     except UnicodeDecodeError as exc:
         raise InputDataError(f"{input_path} is not valid UTF-8 text") from exc
     return validate_segment_artifacts(exposures, tm_results)
+
+
+def read_segment_metadata(path: str | Path) -> dict[str, Any] | None:
+    metadata_path = segment_metadata_path(path)
+    if not metadata_path.exists():
+        return None
+    try:
+        with open_text(metadata_path, "r") as handle:
+            payload = strict_json_loads(handle.read())
+    except UnicodeDecodeError as exc:
+        raise InputDataError(f"{metadata_path} is not valid UTF-8 text") from exc
+    except ValueError as exc:
+        raise InputDataError(f"segment metadata {metadata_path} is invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise InputDataError(f"segment metadata {metadata_path} must be a JSON object")
+    return payload
+
+
+def segment_metadata_path(path: str | Path) -> Path:
+    return Path(f"{path}{SEGMENT_METADATA_SUFFIX}")
+
+
+def validate_segment_metadata(
+    metadata: dict[str, Any],
+    *,
+    config: ScoreConfig,
+    num_train: int,
+    num_test: int,
+    num_refs: int,
+) -> None:
+    if metadata.get("schema_version") != SEGMENT_METADATA_SCHEMA_VERSION:
+        raise InputDataError(
+            f"segment metadata schema_version must be {SEGMENT_METADATA_SCHEMA_VERSION!r}"
+        )
+    if metadata.get("artifact") != "segment_jsonl":
+        raise InputDataError("segment metadata artifact must be 'segment_jsonl'")
+    data = _metadata_object(metadata, "data")
+    _require_metadata_int(data, "num_train", num_train)
+    _require_metadata_int(data, "num_test", num_test)
+    _require_metadata_int(data, "num_refs", num_refs)
+
+    saved_config = _metadata_object(metadata, "config")
+    current_config = config_to_dict(config)
+    for key in ("normalization", "similarity", "index", "pair", "tm"):
+        if saved_config.get(key) != current_config[key]:
+            raise ConfigurationError(
+                f"segment metadata {key} config does not match current scorer config"
+            )
+
+    saved_bins = _metadata_object(saved_config, "bins")
+    current_bins = current_config["bins"]
+    for key in ("far_threshold", "near_threshold"):
+        if saved_bins.get(key) != current_bins[key]:
+            raise ConfigurationError(
+                f"segment metadata bins.{key} does not match current scorer config"
+            )
+
+
+def _metadata_object(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    if not isinstance(value, dict):
+        raise InputDataError(f"segment metadata field {key!r} must be an object")
+    return value
+
+
+def _require_metadata_int(payload: dict[str, Any], key: str, expected: int) -> None:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InputDataError(f"segment metadata data.{key} must be an integer")
+    if value != expected:
+        raise ConfigurationError(
+            f"segment metadata data.{key}={value} does not match current value {expected}"
+        )
 
 
 def validate_segment_artifacts(

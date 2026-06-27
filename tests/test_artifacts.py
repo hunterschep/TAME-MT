@@ -3,8 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from tame_mt.artifacts import read_segment_jsonl, validate_segment_artifacts
-from tame_mt.exceptions import InputDataError
+from tame_mt.artifacts import (
+    read_segment_jsonl,
+    read_segment_metadata,
+    segment_metadata_path,
+    validate_segment_artifacts,
+    validate_segment_metadata,
+)
+from tame_mt.config import ScoreConfig
+from tame_mt.exceptions import ConfigurationError, InputDataError
+from tame_mt.report import config_to_dict
 from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 
@@ -32,6 +40,16 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def _metadata(config: ScoreConfig | None = None) -> dict[str, object]:
+    return {
+        "schema_version": "0.1",
+        "artifact": "segment_jsonl",
+        "data": {"num_train": 4, "num_test": 1, "num_refs": 1},
+        "config": config_to_dict(config or ScoreConfig()),
+        "backend": {"name": "native_exact"},
+    }
 
 
 def test_validate_segment_artifacts_keeps_aligned_rows() -> None:
@@ -200,3 +218,50 @@ def test_read_segment_jsonl_rejects_invalid_gzip(tmp_path: Path) -> None:
 
     with pytest.raises(InputDataError, match="not a valid gzip file"):
         read_segment_jsonl(path)
+
+
+def test_read_segment_metadata_reads_sidecar(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    metadata_path = segment_metadata_path(path)
+    metadata_path.write_text(json.dumps(_metadata()), encoding="utf-8")
+
+    metadata = read_segment_metadata(path)
+
+    assert metadata is not None
+    assert metadata["artifact"] == "segment_jsonl"
+
+
+def test_read_segment_metadata_returns_none_without_sidecar(tmp_path: Path) -> None:
+    assert read_segment_metadata(tmp_path / "segments.jsonl") is None
+
+
+def test_validate_segment_metadata_rejects_schema_mismatch() -> None:
+    metadata = _metadata()
+    metadata["schema_version"] = "9"
+
+    with pytest.raises(InputDataError, match="schema_version"):
+        validate_segment_metadata(
+            metadata,
+            config=ScoreConfig(),
+            num_train=4,
+            num_test=1,
+            num_refs=1,
+        )
+
+
+def test_validate_segment_metadata_rejects_pair_config_mismatch() -> None:
+    metadata = _metadata()
+    config = metadata["config"]
+    assert isinstance(config, dict)
+    pair = config["pair"]
+    assert isinstance(pair, dict)
+    pair["pair_k"] = 10
+
+    with pytest.raises(ConfigurationError, match="pair config"):
+        validate_segment_metadata(
+            metadata,
+            config=ScoreConfig(),
+            num_train=4,
+            num_test=1,
+            num_refs=1,
+        )

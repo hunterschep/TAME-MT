@@ -123,6 +123,11 @@ Cached segment rows include the source-exposure bin assigned during the original
 audit. `score-cached` and `score-cached-batch` verify those labels against the
 current `--far-threshold` and `--near-threshold`; if the thresholds differ,
 TAME-MT fails instead of producing a mixed-configuration report.
+New segment outputs also include an automatic `segments.jsonl.meta.json`
+sidecar. Cached commands validate that sidecar when present, including
+normalization, similarity, retrieval settings, TM zero policy, train/test/ref
+counts, and bin thresholds. Older segment JSONL files without a sidecar still
+work, but they cannot be fully checked for config drift.
 
 `score-cached` reuses source/target/pair exposure and TM hypotheses from the
 segment JSONL file. It recomputes only system metrics, TM metrics, delta over
