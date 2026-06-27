@@ -58,6 +58,8 @@
 - Added automatic segment JSONL metadata sidecars and cached-CLI validation for
   artifact-defining config and count drift while preserving legacy sidecar-free
   segment JSONL compatibility.
+- Exposed segment metadata path/read/validation helpers in the public Python
+  namespace so services can enforce the same cached-artifact checks as the CLI.
 - Added `target_ref_index` and `pair_ref_index` to segment diagnostics so
   multi-reference audits show which reference produced the target and pair
   exposure maxima; older cached JSONL files without those fields remain valid.

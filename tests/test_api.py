@@ -12,6 +12,9 @@ from tame_mt import (
     SegmentTMResult,
     TameScorer,
     read_segment_jsonl,
+    read_segment_metadata,
+    segment_metadata_path,
+    validate_segment_metadata,
 )
 from tame_mt.exceptions import InputDataError
 
@@ -24,12 +27,18 @@ def test_public_api_exports_cached_scoring_types() -> None:
     assert SegmentExposure.__name__ == "SegmentExposure"
     assert SegmentTMResult.__name__ == "SegmentTMResult"
     assert read_segment_jsonl.__name__ == "read_segment_jsonl"
+    assert read_segment_metadata.__name__ == "read_segment_metadata"
+    assert segment_metadata_path.__name__ == "segment_metadata_path"
+    assert validate_segment_metadata.__name__ == "validate_segment_metadata"
     for name in (
         "CachedSegmentScorer",
         "MetricConfig",
         "SegmentExposure",
         "SegmentTMResult",
         "read_segment_jsonl",
+        "read_segment_metadata",
+        "segment_metadata_path",
+        "validate_segment_metadata",
     ):
         assert name in tame_mt.__all__
 

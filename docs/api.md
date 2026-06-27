@@ -180,9 +180,23 @@ current `ScoreConfig.bins`; if you change `far_threshold` or `near_threshold`,
 rerun the audit or score cached artifacts with the original bin settings.
 
 The CLI writes a `.meta.json` sidecar next to new segment JSONL outputs and
-validates it on cached CLI runs. The low-level Python artifact API accepts
-in-memory segment rows directly, so callers that bypass the CLI should keep the
-`ScoreConfig` used to generate the artifacts with the artifact store.
+validates it on cached CLI runs. Python callers can use the same helpers:
+
+```python
+from tame_mt import read_segment_metadata, segment_metadata_path, validate_segment_metadata
+
+metadata = read_segment_metadata("segments.jsonl")
+if metadata is not None:
+    validate_segment_metadata(
+        metadata,
+        config=config,
+        num_train=125000,
+        num_test=len(exposures),
+        num_refs=len(refs),
+    )
+
+print(segment_metadata_path("segments.jsonl"))
+```
 
 ## Custom Configuration
 

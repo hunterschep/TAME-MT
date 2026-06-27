@@ -1,7 +1,12 @@
 """Public API for TAME-MT."""
 
 from tame_mt.api import CachedSegmentScorer, TameScorer, audit, score
-from tame_mt.artifacts import read_segment_jsonl
+from tame_mt.artifacts import (
+    read_segment_jsonl,
+    read_segment_metadata,
+    segment_metadata_path,
+    validate_segment_metadata,
+)
 from tame_mt.config import (
     BinConfig,
     IndexConfig,
@@ -32,13 +37,16 @@ __all__ = [
     "MetricConfig",
     "NormalizationConfig",
     "read_segment_jsonl",
+    "read_segment_metadata",
     "score",
     "ScoreConfig",
     "save_index_bundle",
     "SegmentExposure",
     "SegmentTMResult",
+    "segment_metadata_path",
     "SimilarityConfig",
     "TameReport",
     "TameScorer",
     "TMConfig",
+    "validate_segment_metadata",
 ]
