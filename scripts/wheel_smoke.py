@@ -15,6 +15,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="tame-mt-wheel-smoke-") as tmpdir:
         tmp = Path(tmpdir)
         gz_inputs = _write_gzip_inputs(fixtures, tmp)
+        variant_hyp = tmp / "variant.out.gz"
+        variant_hyp.write_bytes(gzip.compress(b"hola mundo\nbuenos dias\nhasta luego\ndistinto\n"))
 
         _run(["doctor"])
         _run(
@@ -86,6 +88,24 @@ def main() -> int:
         )
         _run(
             [
+                "score-cached-batch",
+                "--segment-in",
+                str(tmp / "segments.jsonl.gz"),
+                "--ref",
+                str(gz_inputs["test.ref"]),
+                "--system",
+                f"baseline={gz_inputs['hyp.out']}",
+                "--system",
+                f"variant={variant_hyp}",
+                "--num-train",
+                "4",
+                "--json-out-dir",
+                str(tmp / "batch_reports"),
+                "--quiet",
+            ]
+        )
+        _run(
+            [
                 "tm-baseline",
                 "--train-src",
                 str(gz_inputs["train.src"]),
@@ -103,14 +123,22 @@ def main() -> int:
         fresh = _read_json(tmp / "fresh.json.gz")
         indexed = _read_json(tmp / "indexed.json.gz")
         cached = _read_json(tmp / "cached.json.gz")
+        batch_baseline = _read_json(tmp / "batch_reports" / "baseline.json")
+        batch_variant = _read_json(tmp / "batch_reports" / "variant.json")
         if fresh["quality"] != indexed["quality"] or fresh["exposure"] != indexed["exposure"]:
             raise SystemExit("indexed score drifted from fresh score")
         if fresh["quality"] != cached["quality"] or fresh["exposure"] != cached["exposure"]:
             raise SystemExit("cached score drifted from fresh score")
+        if batch_baseline["quality"] != cached["quality"]:
+            raise SystemExit("batch cached baseline drifted from single cached score")
+        if batch_variant["quality"]["system"] == batch_baseline["quality"]["system"]:
+            raise SystemExit("batch cached variant did not produce distinct system scores")
         if indexed["backend"]["index_reused"] is not True:
             raise SystemExit("indexed score did not report index reuse")
         if cached["backend"]["resolved_mode"] != "cached_segments":
             raise SystemExit("cached score did not report cached_segments backend")
+        if batch_baseline["backend"]["resolved_mode"] != "cached_segments":
+            raise SystemExit("batch cached score did not report cached_segments backend")
         if len(_read_gzip_lines(tmp / "tm_baseline.out.gz")) != 4:
             raise SystemExit("TM baseline output is not aligned")
         if len(_read_gzip_lines(tmp / "tm_metadata.jsonl.gz")) != 4:
@@ -132,7 +160,9 @@ def _run(args: list[str]) -> None:
 
 
 def _read_json(path: Path) -> dict[str, object]:
-    return json.loads("\n".join(_read_gzip_lines(path)))
+    if path.suffix == ".gz":
+        return json.loads("\n".join(_read_gzip_lines(path)))
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _read_gzip_lines(path: Path) -> list[str]:
