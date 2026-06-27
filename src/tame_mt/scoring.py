@@ -4,14 +4,62 @@ from collections.abc import Mapping, Sequence
 
 from tame_mt.config import ScoreConfig
 from tame_mt.metrics.sacre import (
+    PreparedSacreMetricGroupScorer,
     score_bleu,
     score_chrf,
     score_sacre_metric_groups,
-    score_sacre_metric_groups_for_systems,
 )
 
 GroupedScores = dict[str, dict[str, float | None]]
 SystemGroupedScores = dict[str, GroupedScores]
+
+
+class PreparedGroupScorer:
+    """Reusable metric scorer for one reference set and fixed segment groups."""
+
+    def __init__(
+        self,
+        refs: list[list[str]] | None,
+        groups: Mapping[str, Sequence[int]],
+        config: ScoreConfig,
+    ) -> None:
+        self.refs = refs
+        self.groups = groups
+        self.config = config
+        self._metric_scorers = (
+            {
+                metric: PreparedSacreMetricGroupScorer(
+                    metric,
+                    refs,
+                    groups,
+                    config.metric,
+                )
+                for metric in config.metrics
+            }
+            if refs is not None
+            else {}
+        )
+
+    def score_systems(self, systems: Mapping[str, list[str] | None]) -> SystemGroupedScores:
+        results: SystemGroupedScores = {
+            system_name: _empty_group_scores(self.groups, self.config.metrics)
+            for system_name in systems
+        }
+        if self.refs is None:
+            return results
+
+        active_systems = {
+            system_name: hyps for system_name, hyps in systems.items() if hyps is not None and hyps
+        }
+        if not active_systems:
+            return results
+
+        for metric, metric_scorer in self._metric_scorers.items():
+            metric_results = metric_scorer.score_systems(active_systems)
+            for system_name, group_scores in metric_results.items():
+                for group_name, score in group_scores.items():
+                    results[system_name][group_name][metric] = score
+        return results
 
 
 def score_metrics(
@@ -64,30 +112,7 @@ def score_systems_by_groups(
     groups: Mapping[str, Sequence[int]],
     config: ScoreConfig,
 ) -> SystemGroupedScores:
-    results: SystemGroupedScores = {
-        system_name: _empty_group_scores(groups, config.metrics) for system_name in systems
-    }
-    if refs is None:
-        return results
-
-    active_systems = {
-        system_name: hyps for system_name, hyps in systems.items() if hyps is not None and hyps
-    }
-    if not active_systems:
-        return results
-
-    for metric in config.metrics:
-        metric_results = score_sacre_metric_groups_for_systems(
-            metric,
-            active_systems,
-            refs,
-            groups,
-            config.metric,
-        )
-        for system_name, group_scores in metric_results.items():
-            for group_name, score in group_scores.items():
-                results[system_name][group_name][metric] = score
-    return results
+    return PreparedGroupScorer(refs, groups, config).score_systems(systems)
 
 
 def delta_scores(

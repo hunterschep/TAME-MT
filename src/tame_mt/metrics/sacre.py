@@ -10,6 +10,50 @@ from sacrebleu.metrics.chrf import CHRF
 from tame_mt.config import MetricConfig
 
 
+class PreparedSacreMetricGroupScorer:
+    """Reusable SacreBLEU metric scorer for one metric, reference set, and group map."""
+
+    def __init__(
+        self,
+        metric: str,
+        refs: list[list[str]],
+        groups: Mapping[str, Sequence[int]],
+        config: MetricConfig,
+    ) -> None:
+        self.metric = metric
+        self.refs = refs
+        self.groups = tuple(groups.items())
+        self.config = config
+        self._scorer = _build_sacre_metric(metric, config, refs)
+        self._use_segment_stats = _supports_segment_stats(self._scorer)
+
+    def score_systems(self, systems: Mapping[str, list[str]]) -> dict[str, dict[str, float | None]]:
+        if not self._use_segment_stats:
+            return _score_metric_groups_public(
+                self.metric,
+                systems,
+                self.refs,
+                dict(self.groups),
+                self.config,
+            )
+
+        results: dict[str, dict[str, float | None]] = {}
+        try:
+            for system_name, hyps in systems.items():
+                segment_stats = self._scorer._extract_corpus_statistics(hyps, None)
+                results[system_name] = _aggregate_groups(self._scorer, segment_stats, self.groups)
+            return results
+        except (AttributeError, TypeError):
+            self._use_segment_stats = False
+            return _score_metric_groups_public(
+                self.metric,
+                systems,
+                self.refs,
+                dict(self.groups),
+                self.config,
+            )
+
+
 def score_bleu(hyps: list[str], refs: list[list[str]], config: MetricConfig) -> float:
     score = sacrebleu.corpus_bleu(
         hyps,
@@ -60,37 +104,42 @@ def score_sacre_metric_groups_for_systems(
     avoids rebuilding reference n-grams for the system and TM baseline.
     """
 
-    scorer = _build_sacre_metric(metric, config, refs)
-    if not _supports_segment_stats(scorer):
-        return _score_metric_groups_public(metric, systems, refs, groups, config)
-
-    results: dict[str, dict[str, float | None]] = {}
-    try:
-        for system_name, hyps in systems.items():
-            segment_stats = scorer._extract_corpus_statistics(hyps, None)
-            results[system_name] = _aggregate_groups(scorer, segment_stats, groups)
-        return results
-    except (AttributeError, TypeError):
-        return _score_metric_groups_public(metric, systems, refs, groups, config)
+    return PreparedSacreMetricGroupScorer(metric, refs, groups, config).score_systems(systems)
 
 
 def _aggregate_groups(
     scorer: Any,
     segment_stats: list[Any],
-    groups: Mapping[str, Sequence[int]],
+    groups: Sequence[tuple[str, Sequence[int]]],
 ) -> dict[str, float | None]:
     results: dict[str, float | None] = {}
-    for name, indices in groups.items():
+    for name, indices in groups:
         if not indices:
             results[name] = None
             continue
-        group_stats = (
-            segment_stats
-            if _is_full_span(indices, len(segment_stats))
-            else [segment_stats[index] for index in indices]
-        )
-        results[name] = float(scorer._aggregate_and_compute(group_stats).score)
+        group_stats = _sum_segment_stats(segment_stats, indices)
+        results[name] = float(scorer._compute_score_from_stats(group_stats).score)
     return results
+
+
+def _sum_segment_stats(segment_stats: list[Any], indices: Sequence[int]) -> Any:
+    if len(indices) == 1:
+        return segment_stats[indices[0]]
+
+    is_full_span = _is_full_span(indices, len(segment_stats))
+    first_stats = segment_stats[0] if is_full_span else segment_stats[indices[0]]
+    stat_count = len(first_stats)
+    total = [type(first_stats[0])(0.0)] * stat_count
+    if is_full_span:
+        for stats in segment_stats:
+            for stat_idx in range(stat_count):
+                total[stat_idx] += stats[stat_idx]
+    else:
+        for segment_idx in indices:
+            stats = segment_stats[segment_idx]
+            for stat_idx in range(stat_count):
+                total[stat_idx] += stats[stat_idx]
+    return total
 
 
 def _is_full_span(indices: Sequence[int], length: int) -> bool:
@@ -103,7 +152,7 @@ def _is_full_span(indices: Sequence[int], length: int) -> bool:
 
 def _supports_segment_stats(scorer: Any) -> bool:
     return callable(getattr(scorer, "_extract_corpus_statistics", None)) and callable(
-        getattr(scorer, "_aggregate_and_compute", None)
+        getattr(scorer, "_compute_score_from_stats", None)
     )
 
 

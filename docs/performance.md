@@ -92,10 +92,14 @@ and 2,000 test pairs completed as follows:
 | Synthetic 100k train / 2k test, one-time compressed index build | `native_fast` | ~3.5s |
 | Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~0.9s |
 | Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.4s |
+| Synthetic 100k train / 2k test, prepare cached scorer | cached diagnostics | ~0.3s |
+| Synthetic 100k train / 2k test, prepared cached hypothesis scoring | cached diagnostics | ~0.2s |
+| Synthetic 100k train / 2k test, prepared batch cached scoring, 5 systems | cached diagnostics | ~0.2s/system |
 | Synthetic 100k train / 10k test, fresh audit | `native_fast` | ~4.3s |
 | Synthetic 100k train / 10k test, one-time compressed index build | `native_fast` | ~3.5s |
-| Synthetic 100k train / 10k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.9s |
-| Synthetic 100k train / 10k test, cached hypothesis scoring | cached diagnostics | ~2.3s |
+| Synthetic 100k train / 10k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.8s |
+| Synthetic 100k train / 10k test, cached hypothesis scoring | cached diagnostics | ~2.2s |
+| Synthetic 100k train / 10k test, prepared cached hypothesis scoring | cached diagnostics | ~0.8s |
 
 These numbers are smoke timings, not universal performance claims. Report the
 machine, corpus size, backend, and full TAME-MT signature for benchmark tables.
@@ -123,6 +127,10 @@ For many systems on the same cached diagnostics, use `score-cached-batch`
 instead of one `score-cached` process per system. Batch mode reads and validates
 the segment JSONL once, keeps SacreBLEU reference caches alive across all
 systems for each metric, and computes TM baseline scores once for the batch. On
-the local synthetic 100,000 train / 2,000 test benchmark, scoring five cached
-systems took about 2.1 seconds as repeated single-system calls and about 1.0
-second through the batch API.
+the local synthetic 100,000 train / 2,000 test benchmark, a prepared cached
+scorer takes about 0.26 seconds to build and then scores five cached systems in
+about 0.83 seconds total, or roughly 0.17 seconds per system. In Python
+applications that receive systems over time, use
+`TameScorer.prepare_from_artifacts()` and keep the returned scorer alive so
+later calls skip artifact validation, reference preprocessing, and TM baseline
+scoring.

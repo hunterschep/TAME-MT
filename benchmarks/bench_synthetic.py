@@ -32,6 +32,9 @@ def main() -> int:
         help="staged mode threshold for .tameidx load plus indexed audit time",
     )
     parser.add_argument("--max-cached-seconds", type=float, default=None)
+    parser.add_argument("--max-prepared-cached-seconds", type=float, default=None)
+    parser.add_argument("--batch-systems", type=int, default=5)
+    parser.add_argument("--max-cached-batch-per-system-seconds", type=float, default=None)
     parser.add_argument(
         "--max-index-bytes",
         type=int,
@@ -66,12 +69,15 @@ def main() -> int:
         "native": native_status().__dict__,
     }
     if args.staged:
+        if args.batch_systems <= 0:
+            raise SystemExit("--batch-systems must be positive")
         payload["stages"] = run_staged_benchmark(
             train_src=train_src,
             train_tgt=train_tgt,
             test_src=test_src,
             refs=refs,
             config=config,
+            batch_systems=args.batch_systems,
         )
     print(strict_json_dumps(payload, indent=2, sort_keys=True))
 
@@ -86,6 +92,8 @@ def main() -> int:
             max_index_build_seconds=args.max_index_build_seconds,
             max_indexed_seconds=args.max_indexed_seconds,
             max_cached_seconds=args.max_cached_seconds,
+            max_prepared_cached_seconds=args.max_prepared_cached_seconds,
+            max_cached_batch_per_system_seconds=args.max_cached_batch_per_system_seconds,
             max_index_bytes=args.max_index_bytes,
         )
     return 0
@@ -97,6 +105,7 @@ def run_staged_benchmark(
     test_src: list[str],
     refs: list[str],
     config: ScoreConfig,
+    batch_systems: int,
 ) -> dict[str, float | int | str]:
     scorer = TameScorer(config)
     with tempfile.TemporaryDirectory(prefix="tame-mt-bench-") as tmpdir:
@@ -131,12 +140,45 @@ def run_staged_benchmark(
         if cached_report.exposure != indexed_result.report.exposure:
             raise SystemExit("cached scoring exposure summary drifted from indexed audit")
 
+        started = time.perf_counter()
+        cached_scorer = scorer.prepare_from_artifacts(
+            exposures=indexed_result.exposures,
+            tm_results=indexed_result.tm_results,
+            refs=[refs],
+            num_train=len(train_src),
+        )
+        cached_prepare_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
+        prepared_report = cached_scorer.score(refs)
+        prepared_cached_score_seconds = time.perf_counter() - started
+
+        if prepared_report.exposure != indexed_result.report.exposure:
+            raise SystemExit("prepared cached scoring exposure summary drifted from indexed audit")
+        if (
+            prepared_report.system_scores != cached_report.system_scores
+            or prepared_report.tm_scores != cached_report.tm_scores
+        ):
+            raise SystemExit("prepared cached scoring drifted from end-to-end cached scoring")
+
+        systems = make_system_outputs(refs, batch_systems)
+        started = time.perf_counter()
+        batch_reports = cached_scorer.score_many(systems)
+        cached_batch_score_seconds = time.perf_counter() - started
+        if set(batch_reports) != set(systems):
+            raise SystemExit("prepared batch cached scoring dropped a system")
+
         return {
             "index_build_seconds": index_build_seconds,
             "index_load_seconds": index_load_seconds,
             "indexed_audit_seconds": indexed_audit_seconds,
             "indexed_total_seconds": indexed_total_seconds,
             "cached_score_seconds": cached_score_seconds,
+            "cached_prepare_seconds": cached_prepare_seconds,
+            "prepared_cached_score_seconds": prepared_cached_score_seconds,
+            "cached_batch_systems": batch_systems,
+            "cached_batch_score_seconds": cached_batch_score_seconds,
+            "cached_batch_seconds_per_system": cached_batch_score_seconds / batch_systems,
             "index_bytes": index_path.stat().st_size,
             "indexed_backend": indexed_result.report.backend["name"],
             "cached_backend": cached_report.backend["name"],
@@ -150,6 +192,8 @@ def assert_stage_thresholds(
     max_index_build_seconds: float | None,
     max_indexed_seconds: float | None,
     max_cached_seconds: float | None,
+    max_prepared_cached_seconds: float | None,
+    max_cached_batch_per_system_seconds: float | None,
     max_index_bytes: int | None,
 ) -> None:
     if not isinstance(stages, dict):
@@ -165,6 +209,16 @@ def assert_stage_thresholds(
         ),
         "cached_score_seconds": (
             max_cached_seconds if max_cached_seconds is not None else (3.0 if small else 10.0)
+        ),
+        "prepared_cached_score_seconds": (
+            max_prepared_cached_seconds
+            if max_prepared_cached_seconds is not None
+            else (2.0 if small else 5.0)
+        ),
+        "cached_batch_seconds_per_system": (
+            max_cached_batch_per_system_seconds
+            if max_cached_batch_per_system_seconds is not None
+            else (2.0 if small else 5.0)
         ),
     }
     for key, threshold in thresholds.items():
@@ -208,6 +262,19 @@ def make_corpus(
             test_src.append(f"heldout domain {idx % 101} source sample {idx:06d} topic {idx % 23}")
             refs.append(f"heldout domain {idx % 101} target sample {idx:06d} topic {idx % 23}")
     return train_src, train_tgt, test_src, refs
+
+
+def make_system_outputs(refs: list[str], count: int) -> dict[str, list[str]]:
+    systems: dict[str, list[str]] = {}
+    for system_idx in range(count):
+        if system_idx == 0:
+            systems[f"system_{system_idx}"] = list(refs)
+            continue
+        systems[f"system_{system_idx}"] = [
+            f"{ref} variant {system_idx}" if (segment_idx + system_idx) % 7 == 0 else ref
+            for segment_idx, ref in enumerate(refs)
+        ]
+    return systems
 
 
 if __name__ == "__main__":

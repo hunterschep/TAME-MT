@@ -146,6 +146,31 @@ Batch artifact scoring validates segment diagnostics once, reuses the same
 reference cache for every system, and computes TM baseline scores once for the
 batch.
 
+For services, notebooks, and leaderboards that receive hypotheses over time,
+prepare a cached scorer once and reuse it:
+
+```python
+cached = scorer.prepare_from_artifacts(
+    exposures=exposures,
+    tm_results=tm_results,
+    refs=[read_lines("test.ref")],
+    num_train=125000,
+)
+
+system_a_report = cached.score(read_lines("system_a.out"), system_name="system_a")
+
+later_reports = cached.score_many(
+    {
+        "system_b": read_lines("system_b.out"),
+        "system_c": read_lines("system_c.out"),
+    }
+)
+```
+
+The prepared scorer owns a validated snapshot of the references, exposure bins,
+SacreBLEU reference caches, and TM baseline scores. Later `score()` and
+`score_many()` calls only score the supplied system hypotheses.
+
 Artifact indices are validated and canonicalized before scoring. They must be
 unique and contiguous from `0` to `N-1`; valid rows may be supplied out of order.
 

@@ -130,6 +130,11 @@ audit. When evaluating many systems, `score-cached-batch` reads and validates
 the cached segment diagnostics once and computes the TM baseline once for the
 whole batch.
 
+Python services and notebooks can go one step further with
+`TameScorer.prepare_from_artifacts()`: validate the cached diagnostics once,
+keep SacreBLEU reference caches and TM baseline scores alive, then call
+`cached.score(...)` for each later hypothesis.
+
 Try the bundled toy example:
 
 ```bash
@@ -618,13 +623,17 @@ saved index took about 2.3 seconds with identical exposure outputs.
 On a synthetic benchmark on the same machine, a 100,000 train / 2,000 test
 `native_fast` audit takes about 2.5 seconds fresh, about 0.9 seconds from a
 saved `.tameidx`, and about 0.4 seconds for cached scoring of another
-hypothesis. The compressed 100,000-pair source+target `.tameidx` is about 67 MB
-on that benchmark. At 100,000 train / 10,000 test, the same path takes about
-4.3 seconds fresh, about 2.9 seconds from a saved `.tameidx`, and about 2.3
-seconds for cached scoring. The cached stage is the closest analogue to
-ordinary BLEU/chrF scoring because it no longer touches the training corpus.
-Ordered cached artifacts take a fast validation path, and whole-corpus
-SacreBLEU statistics are reused without copying before bin aggregation.
+hypothesis end to end. A prepared cached scorer takes about 0.26 seconds to
+build, then about 0.16 seconds per later hypothesis; five prepared cached
+systems score at about 0.17 seconds per system. The compressed 100,000-pair
+source+target `.tameidx` is about 67 MB on that benchmark. At 100,000 train /
+10,000 test, the same path takes about 4.3 seconds fresh, about 2.8 seconds
+from a saved `.tameidx`, about 2.2 seconds for one end-to-end cached score, and
+about 0.8 seconds for each later prepared cached score. The cached stage is the
+closest analogue to ordinary BLEU/chrF scoring because it no longer touches the
+training corpus. Ordered cached artifacts take a fast validation path, and
+whole-corpus SacreBLEU statistics are reused without copying before bin
+aggregation.
 Source-only audits and `tm-baseline` queries also use top-1 source retrieval
 unless pair exposure is being computed.
 

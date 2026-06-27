@@ -21,6 +21,8 @@ python benchmarks/bench_synthetic.py \
   --max-index-build-seconds 8 \
   --max-indexed-seconds 4 \
   --max-cached-seconds 3 \
+  --max-prepared-cached-seconds 1 \
+  --max-cached-batch-per-system-seconds 1 \
   --max-index-bytes 120000000 \
   --assert-thresholds
 

@@ -1,6 +1,6 @@
 """Public API for TAME-MT."""
 
-from tame_mt.api import TameScorer, audit, score
+from tame_mt.api import CachedSegmentScorer, TameScorer, audit, score
 from tame_mt.artifacts import read_segment_jsonl
 from tame_mt.config import (
     BinConfig,
@@ -24,6 +24,7 @@ __all__ = [
     "__version__",
     "audit",
     "BinConfig",
+    "CachedSegmentScorer",
     "IndexConfig",
     "IndexBundle",
     "inspect_index_bundle",

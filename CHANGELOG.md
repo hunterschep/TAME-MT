@@ -58,6 +58,10 @@
 - Added `score-cached-batch` and a batch artifact-scoring API so many systems
   can share one segment-artifact read, one reference cache, and one TM baseline
   scoring pass.
+- Added `CachedSegmentScorer` and `TameScorer.prepare_from_artifacts()` so
+  services and notebooks can validate cached diagnostics once, keep SacreBLEU
+  reference caches and TM baseline scores alive, and score later hypotheses with
+  prepared cached-score latency.
 - Exposed cached-scoring artifact types, `read_segment_jsonl`, and
   `MetricConfig` from the top-level Python package API.
 - Reduced source-only audit and TM-baseline retrieval work by querying only the
@@ -75,6 +79,8 @@
 - Applied `.gz` output support consistently to TM baseline metadata JSONL.
 - Extended the synthetic benchmark with staged index-build, indexed-audit, and
   cached-scoring timings.
+- Extended staged benchmark guards with prepared cached-score and batch
+  per-system latency checks.
 - Made staged benchmark indexed timings include persisted `.tameidx` load time.
 - Tightened release acceptance performance checks to cover the 100k staged
   benchmark path with explicit build, indexed-audit, and cached-score

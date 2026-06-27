@@ -3,18 +3,32 @@ from pathlib import Path
 import pytest
 
 import tame_mt
-from tame_mt import MetricConfig, SegmentExposure, SegmentTMResult, TameScorer, read_segment_jsonl
+from tame_mt import (
+    CachedSegmentScorer,
+    MetricConfig,
+    SegmentExposure,
+    SegmentTMResult,
+    TameScorer,
+    read_segment_jsonl,
+)
 from tame_mt.exceptions import InputDataError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_public_api_exports_cached_scoring_types() -> None:
+    assert CachedSegmentScorer.__name__ == "CachedSegmentScorer"
     assert MetricConfig.__name__ == "MetricConfig"
     assert SegmentExposure.__name__ == "SegmentExposure"
     assert SegmentTMResult.__name__ == "SegmentTMResult"
     assert read_segment_jsonl.__name__ == "read_segment_jsonl"
-    for name in ("MetricConfig", "SegmentExposure", "SegmentTMResult", "read_segment_jsonl"):
+    for name in (
+        "CachedSegmentScorer",
+        "MetricConfig",
+        "SegmentExposure",
+        "SegmentTMResult",
+        "read_segment_jsonl",
+    ):
         assert name in tame_mt.__all__
 
 
@@ -104,6 +118,46 @@ def test_score_many_from_artifacts_matches_single_system_reports() -> None:
         batch_reports["variant"].system_scores["chrf"]
         != batch_reports["baseline"].system_scores["chrf"]
     )
+
+
+def test_prepare_from_artifacts_reuses_cached_setup_for_later_systems() -> None:
+    exposures = [
+        _segment(0, 1.0, "source_exact"),
+        _segment(1, 0.1, "far"),
+    ]
+    tm_results = [
+        SegmentTMResult(index=0, tm_hyp="good", tm_source_index=0, tm_source_similarity=1.0),
+        SegmentTMResult(index=1, tm_hyp="bad", tm_source_index=1, tm_source_similarity=0.1),
+    ]
+    refs = [["good", "bad"]]
+    scorer = TameScorer()
+
+    cached = scorer.prepare_from_artifacts(
+        exposures=exposures,
+        tm_results=tm_results,
+        refs=refs,
+        num_train=2,
+    )
+    refs[0][0] = "mutated after prepare"
+
+    prepared_report = cached.score(["good", "bad"])
+    direct_report = scorer.score_from_artifacts(
+        exposures=exposures,
+        tm_results=tm_results,
+        refs=[["good", "bad"]],
+        hyp=["good", "bad"],
+        num_train=2,
+    )
+    batch_reports = cached.score_many(
+        {
+            "baseline": ["good", "bad"],
+            "variant": ["good", "different"],
+        }
+    )
+
+    assert prepared_report.to_dict() == direct_report.to_dict()
+    assert batch_reports["baseline"].to_dict() == direct_report.to_dict()
+    assert batch_reports["variant"].system_scores["chrf"] != direct_report.system_scores["chrf"]
 
 
 def test_score_from_artifacts_rejects_missing_segment_index() -> None:
