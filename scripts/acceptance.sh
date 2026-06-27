@@ -6,6 +6,7 @@ python -m pip install -e '.[dev]'
 ruff format --check .
 ruff check .
 mypy src/tame_mt
+python scripts/check_versions.py
 cargo fmt --check
 cargo clippy -- -D warnings
 cargo test
@@ -17,6 +18,22 @@ python benchmarks/validate_fast_recall.py --require-native
 python benchmarks/bench_synthetic.py \
   --train-size 100000 \
   --test-size 2000 \
+  --staged \
+  --max-seconds 60 \
+  --max-index-build-seconds 8 \
+  --max-indexed-seconds 60 \
+  --max-cached-seconds 3 \
+  --max-prepared-cached-seconds 1 \
+  --max-cached-batch-per-system-seconds 1 \
+  --max-index-bytes 120000000 \
+  --assert-thresholds
+
+python benchmarks/bench_synthetic.py \
+  --train-size 100000 \
+  --test-size 2000 \
+  --retrieval approx \
+  --allow-approximate \
+  --index-mode native_fast \
   --staged \
   --max-seconds 12 \
   --max-index-build-seconds 8 \
@@ -57,6 +74,12 @@ tame-mt index build \
   --train-tgt tests/fixtures/train.tgt \
   --out /tmp/tame_fixture.tameidx \
   --quiet
+
+tame-mt index verify \
+  /tmp/tame_fixture.tameidx \
+  --train-src tests/fixtures/train.src \
+  --train-tgt tests/fixtures/train.tgt \
+  --json
 
 tame-mt score \
   --index /tmp/tame_fixture.tameidx \

@@ -74,6 +74,14 @@ def native_index_from_bytes(data: bytes) -> Any:
     return module.NativeNgramIndex.from_bytes(data)
 
 
+def native_thread_count() -> int | None:
+    status = native_status()
+    if not status.available:
+        return None
+    module = _load_native_module()
+    return int(module.native_thread_count())
+
+
 def _load_native_module() -> Any:
     module = import_module("tame_mt._native")
     version = _module_version(module)

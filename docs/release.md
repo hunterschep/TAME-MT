@@ -27,9 +27,11 @@ find src/tame_mt -maxdepth 1 \( -name '_native*.so' -o -name '_native*.pyd' -o -
 ## Version And Changelog
 
 1. Update the package version in `pyproject.toml`, `Cargo.toml`, and
-   `src/tame_mt/version.py`.
+   `src/tame_mt/version.py`. Also update `CITATION.cff` and README/schema
+   examples that embed the release version.
 2. Update `CHANGELOG.md`.
-3. Confirm `tame-mt doctor` reports matching Python and native versions from a
+3. Run `python scripts/check_versions.py`.
+4. Confirm `tame-mt doctor` reports matching Python and native versions from a
    freshly built wheel.
 
 ## GitHub Release Workflow

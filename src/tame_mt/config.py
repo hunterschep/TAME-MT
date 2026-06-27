@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import isfinite
 from typing import Literal
 
@@ -61,18 +61,11 @@ class IndexConfig:
             raise ConfigurationError("index mode must be a string")
         valid_modes = {
             "auto",
-            "inverted_exact",
-            "inverted_fast",
-            "python_exact",
-            "python_fast",
             "native_exact",
             "native_fast",
         }
         if self.mode not in valid_modes:
-            raise ConfigurationError(
-                "index mode must be one of: auto, inverted_exact, inverted_fast, "
-                "python_exact, python_fast, native_exact, native_fast"
-            )
+            raise ConfigurationError("index mode must be one of: auto, native_exact, native_fast")
         _require_positive_int("topk", self.topk)
         _require_positive_int("batch_size", self.batch_size)
         _require_non_negative_int("auto_exact_cutoff", self.auto_exact_cutoff)
@@ -82,6 +75,24 @@ class IndexConfig:
         _require_positive_int("rerank_limit", self.rerank_limit)
         if self.rerank_limit > self.max_candidates:
             raise ConfigurationError("rerank_limit must be no larger than max_candidates")
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalConfig:
+    mode: str = "exact"
+    allow_approximate: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, str):
+            raise ConfigurationError("retrieval mode must be a string")
+        valid_modes = {"exact", "guarded", "approx"}
+        if self.mode not in valid_modes:
+            raise ConfigurationError("retrieval mode must be one of: exact, guarded, approx")
+        _require_bool("allow_approximate", self.allow_approximate)
+        if self.mode == "approx" and not self.allow_approximate:
+            raise ConfigurationError(
+                "approximate retrieval must be explicitly enabled with allow_approximate=True"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +146,7 @@ class ScoreConfig:
     normalization: NormalizationConfig = field(default_factory=NormalizationConfig)
     similarity: SimilarityConfig = field(default_factory=SimilarityConfig)
     index: IndexConfig = field(default_factory=IndexConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     bins: BinConfig = field(default_factory=BinConfig)
     tm: TMConfig = field(default_factory=TMConfig)
     metric: MetricConfig = field(default_factory=MetricConfig)
@@ -143,9 +155,11 @@ class ScoreConfig:
         _require_config_type("normalization", self.normalization, NormalizationConfig)
         _require_config_type("similarity", self.similarity, SimilarityConfig)
         _require_config_type("index", self.index, IndexConfig)
+        _require_config_type("retrieval", self.retrieval, RetrievalConfig)
         _require_config_type("bins", self.bins, BinConfig)
         _require_config_type("tm", self.tm, TMConfig)
         _require_config_type("metric", self.metric, MetricConfig)
+        _normalize_retrieval_index_pair(self)
         if isinstance(self.metrics, str) or not isinstance(self.metrics, Sequence):
             raise ConfigurationError("metrics must be a sequence of metric names")
         normalized_metrics: list[str] = []
@@ -163,6 +177,24 @@ class ScoreConfig:
         if duplicates:
             raise ConfigurationError(f"duplicate metrics are not allowed: {', '.join(duplicates)}")
         object.__setattr__(self, "metrics", normalized_metrics_tuple)
+
+
+def _normalize_retrieval_index_pair(config: ScoreConfig) -> None:
+    if config.retrieval.mode == "approx":
+        if config.index.mode == "auto":
+            object.__setattr__(config, "index", replace(config.index, mode="native_fast"))
+        elif config.index.mode == "native_exact":
+            raise ConfigurationError(
+                "retrieval mode 'approx' requires an approximate backend such as native_fast"
+            )
+        return
+
+    if config.index.mode == "native_fast":
+        raise ConfigurationError(
+            f"retrieval mode {config.retrieval.mode!r} cannot use approximate backend "
+            f"{config.index.mode!r}; use RetrievalConfig(mode='approx', "
+            "allow_approximate=True) for approximate scoring"
+        )
 
 
 def parse_float_tuple(value: str) -> tuple[float, ...]:

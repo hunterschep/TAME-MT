@@ -64,9 +64,6 @@ def compute_exposure_result(
     needs_pair_candidates = target_index is not None and refs is not None
     retrieval_k = max(1, config.index.topk if needs_pair_candidates else 1)
     batch_size = config.index.batch_size
-    supports_native_pair = (
-        target_index is not None and source_index.supports_native_pair_candidates(target_index)
-    )
     for batch_start in range(0, len(test_src), batch_size):
         batch_end = min(batch_start + batch_size, len(test_src))
         batch_sources = test_src[batch_start:batch_end]
@@ -97,7 +94,7 @@ def compute_exposure_result(
                 source_index=source_index,
                 target_index=target_index,
             )
-            if target_index is not None and refs is not None and supports_native_pair
+            if target_index is not None and refs is not None
             else None
         )
 
@@ -310,27 +307,12 @@ def _compute_pair_neighbor(
         candidates.update(_candidate_indices(top_results))
 
     sorted_candidates = sorted(candidates)
-    native_best = source_index.best_pair_candidate(
+    return source_index.best_pair_candidate(
         target_index,
         source_text,
         ref_texts,
         sorted_candidates,
     )
-    if native_best is not None:
-        return native_best
-
-    best = NeighborResult(index=None, score=0.0, exact=False)
-    source_scores = source_index.score_candidates(source_text, sorted_candidates)
-    target_scores_by_ref = [
-        target_index.score_candidates(ref, sorted_candidates) for ref in ref_texts
-    ]
-    for candidate in sorted_candidates:
-        src_sim = source_scores[candidate]
-        tgt_sim = max(target_scores[candidate] for target_scores in target_scores_by_ref)
-        pair_sim = min(src_sim, tgt_sim)
-        if pair_sim > best.score:
-            best = NeighborResult(index=candidate, score=pair_sim, exact=pair_sim == 1.0)
-    return best
 
 
 def _best_pair_ref_index(
@@ -360,7 +342,7 @@ def _batch_pair_neighbors(
     target_tops_by_ref: list[list[list[NeighborResult]]],
     source_index: NgramInvertedIndex,
     target_index: NgramInvertedIndex,
-) -> list[NeighborResult] | None:
+) -> list[NeighborResult]:
     ref_texts_by_segment = [
         [ref[idx] for ref in normalized_refs_by_ref] for idx in range(len(normalized_test_src))
     ]

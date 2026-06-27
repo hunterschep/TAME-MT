@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use TAME-MT, please cite it using this metadata."
-title: "TAME-MT: Training-Aware Machine Translation Evaluation for Machine Translation"
+title: "TAME-MT: Training-Aware Machine Translation Evaluation"
 version: "0.1.0"
 date-released: "2026-06-26"
 authors:

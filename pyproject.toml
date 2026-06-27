@@ -43,6 +43,7 @@ Issues = "https://github.com/hunterschep/TAME-MT/issues"
 [project.optional-dependencies]
 dev = [
   "build>=1.0",
+  "jsonschema>=4.20",
   "maturin>=1.7,<2",
   "mypy>=1.8",
   "pip-audit>=2.7",
@@ -57,6 +58,7 @@ tame-mt = "tame_mt.cli:main"
 [tool.maturin]
 exclude = ["demo_runs/**", "dist/**", "target/**"]
 features = ["pyo3/extension-module"]
+include = ["schemas/*.json"]
 module-name = "tame_mt._native"
 python-source = "src"
 

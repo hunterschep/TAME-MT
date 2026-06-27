@@ -77,6 +77,19 @@ Inspect metadata without loading the native indexes:
 tame-mt index inspect train.tameidx
 ```
 
+Verify a bundle before reuse or transfer:
+
+```bash
+tame-mt index verify train.tameidx \
+  --train-src train.src \
+  --train-tgt train.tgt
+```
+
+`index verify` checks the manifest format, archive member set, declared sizes,
+load-memory budget, member SHA-256 hashes, optional supplied training-file
+hashes, and native-index invariants. Use `--json` for a machine-readable
+summary.
+
 Index bundles store raw training text and normalized exact-match and pair keys.
 Protect them with the same access controls as the original training corpus.
 Index bundle writes are atomic: the output path is replaced only after the new
@@ -135,10 +148,11 @@ audit. `score-cached` and `score-cached-batch` verify those labels against the
 current `--far-threshold` and `--near-threshold`; if the thresholds differ,
 TAME-MT fails instead of producing a mixed-configuration report.
 New segment outputs also include an automatic `segments.jsonl.meta.json`
-sidecar. Cached commands validate that sidecar when present, including
+sidecar. Cached commands require and validate that sidecar, including
 normalization, similarity, retrieval settings, TM zero policy, train/test/ref
-counts, and bin thresholds. Older segment JSONL files without a sidecar still
-work, but they cannot be fully checked for config drift.
+counts, bin thresholds, reference content hashes, and TM hypothesis hashes.
+Older segment JSONL files without a sidecar fail by default; pass
+`--allow-unsafe-no-metadata` only for legacy artifacts you trust.
 When a sidecar is present, cached JSON reports copy the original producing
 backend into `backend.artifact_backend`.
 
@@ -147,6 +161,10 @@ segment JSONL file. It recomputes only system metrics, TM metrics, delta over
 TM, bin scores, warnings, and the final report.
 `score-cached-batch` does the same work for multiple systems while reading and
 validating the segment JSONL once and computing the TM baseline once.
+
+Segment JSONL contains TM hypotheses by default and may contain raw
+training-target text. Use `--no-tm-text-in-segments` for privacy-safer
+diagnostics that cannot be used by `score-cached`.
 
 Segment rows are validated before scoring. Indices must be unique and
 contiguous from `0` to `N-1`; valid rows may appear in any order and are sorted
@@ -171,6 +189,10 @@ ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 --posting-limit 500
 --max-candidates 3000
 --rerank-limit 1000
+--validate-approx-sample 0
+--validate-approx-seed 13
+--validate-approx-exact-mode native_exact
+--allow-approx-validation-failure
 --min-bin-size-warning 30
 --tm-zero-policy empty
 --lowercase
@@ -180,6 +202,7 @@ ending in `.gz` is read or written as gzip-compressed UTF-8 text.
 --bleu-lowercase
 --chrf-word-order 2
 --verbose
+--profile-json profile.json
 ```
 
 Numeric options must be finite decimal values. `nan`, `inf`, and `-inf` are
@@ -194,6 +217,33 @@ stderr without changing report output. This covers `score`, `audit`,
 Lower `--batch-size` if source/reference retrieval batches use too much memory
 on a very large test set.
 
+Use `--profile-json profile.json` on long-running commands to write structured
+performance metadata. Report JSON includes a `performance` object with backend,
+thread count, peak RSS, index-reuse status, and report-available timings. The
+profile artifact records final command timings, including output writing, and a
+small summary of any reports produced.
+
+For approximate runs, add `--validate-approx-sample N` to score a deterministic
+sample with exact retrieval and fail if the approximate run disagrees too much:
+
+```bash
+tame-mt audit \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --test-src test.src \
+  --ref test.ref \
+  --retrieval approx \
+  --allow-approximate \
+  --validate-approx-sample 1000 \
+  --json-out audit.json
+```
+
+Validation writes `approx_validation` into the JSON report and adds
+`validate_approximate_retrieval` to profile timings. It is intentionally
+available only when creating fresh diagnostics with `score`, `audit`, or
+`tm-baseline`; cached scoring reuses existing segment diagnostics and rejects
+`--validate-approx-sample`.
+
 ## Doctor
 
 ```bash
@@ -201,8 +251,9 @@ tame-mt doctor
 ```
 
 `doctor` prints the TAME-MT version, Python/platform details, SacreBLEU
-version, and whether the native Rust backend is importable. Use it first when a
-large run seems unexpectedly slow.
+version, Rayon thread count when native is available, and whether the native
+Rust backend is importable. Use it first when a large run seems unexpectedly
+slow.
 
 ## Segment Text Options
 
@@ -242,9 +293,9 @@ or comma-separated:
 
 ## Retrieval Performance
 
-`--index-mode auto` is the default. It uses `native_exact` or `native_fast`
-when the Rust extension is installed. If the native extension is unavailable,
-it falls back to `python_exact` or `python_fast`.
+`--retrieval exact --index-mode auto` is the default. It requires the Rust
+extension and resolves to `native_exact`. If the native extension is
+unavailable, default scoring exits with an installation error.
 
 Use exact mode explicitly when the corpus is small or when exact nearest-neighbor
 exposure is required:
@@ -253,14 +304,25 @@ exposure is required:
 --index-mode native_exact
 ```
 
-Use fast mode explicitly for large public corpora:
+Use approximate fast mode only for exploratory or recall-validated workflows:
 
 ```bash
---index-mode native_fast
+--retrieval approx --allow-approximate --index-mode native_fast
 ```
 
 Fast mode selects rare query n-grams, reads bounded postings, keeps an
 approximate shortlist, and reranks that shortlist with exact Jaccard similarity.
+Reports label this as approximate retrieval and show `PairLeakTopK` for pair
+thresholds.
 
-The older `inverted_exact` and `inverted_fast` names remain accepted as
-pure-Python aliases for compatibility.
+For large approximate runs, use `--validate-approx-sample N` as a per-corpus
+guardrail. The validation sample compares source nearest-neighbor identity,
+source-bin agreement, source-score error, target nearest-neighbor identity,
+pair-threshold decisions, and sample TM-BLEU against exact `native_exact`
+retrieval. By default, validation failures exit with code `2`. Pass
+`--allow-approx-validation-failure` only when you deliberately want the report
+written with the failure recorded as a warning.
+
+`auto`, `native_exact`, and `native_fast` are the only accepted index modes.
+There are no Python retrieval backends; if the Rust extension is unavailable,
+TAME-MT reports an installation error.

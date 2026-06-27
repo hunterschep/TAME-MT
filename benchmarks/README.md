@@ -37,6 +37,26 @@ python benchmarks/bench_synthetic.py \
   --train-size 100000 \
   --test-size 2000 \
   --staged \
+  --max-seconds 60 \
+  --max-index-build-seconds 8 \
+  --max-indexed-seconds 60 \
+  --max-cached-seconds 3 \
+  --max-prepared-cached-seconds 1 \
+  --max-cached-batch-per-system-seconds 1 \
+  --max-index-bytes 120000000 \
+  --assert-thresholds
+```
+
+Run the matching approximate throughput check:
+
+```bash
+python benchmarks/bench_synthetic.py \
+  --train-size 100000 \
+  --test-size 2000 \
+  --retrieval approx \
+  --allow-approximate \
+  --index-mode native_fast \
+  --staged \
   --max-seconds 12 \
   --max-index-build-seconds 8 \
   --max-indexed-seconds 4 \
@@ -48,7 +68,8 @@ python benchmarks/bench_synthetic.py \
 ```
 
 CI runs a 50k train / 1k test staged benchmark outside the Python-version
-matrix. The 100k local check above remains the release-candidate gate in
+matrix plus a separate approximate throughput benchmark. The 100k exact and
+approximate local checks above remain the release-candidate gates in
 `scripts/acceptance.sh`.
 
 For public-corpus timing, use:

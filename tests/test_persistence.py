@@ -6,7 +6,7 @@ import pytest
 
 import tame_mt.persistence as persistence
 from tame_mt.api import TameScorer
-from tame_mt.config import IndexConfig, ScoreConfig
+from tame_mt.config import IndexConfig, RetrievalConfig, ScoreConfig
 from tame_mt.exceptions import ConfigurationError
 from tame_mt.persistence import (
     FORMAT_VERSION,
@@ -18,6 +18,7 @@ from tame_mt.persistence import (
     inspect_index_bundle,
     load_index_bundle,
     save_index_bundle,
+    verify_index_bundle,
 )
 
 
@@ -47,6 +48,13 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     assert manifest["storage"]["compression"] == ZIP_COMPRESSION_NAME
     assert manifest["storage"]["compresslevel"] == ZIP_COMPRESSLEVEL
     assert manifest["storage"]["native_index_schema_version"] == NATIVE_INDEX_SCHEMA_VERSION
+    assert manifest["hashes"]["train_src_sha256"]
+    assert manifest["hashes"]["train_src_normalized_sha256"]
+    assert manifest["hashes"]["source_index_sha256"]
+    assert manifest["hashes"]["train_tgt_sha256"]
+    assert manifest["hashes"]["train_tgt_normalized_sha256"]
+    assert manifest["hashes"]["target_index_sha256"]
+    assert manifest["hashes"]["exact_pair_keys_sha256"]
     assert manifest["privacy"]["stores_raw_training_text"] is True
     assert manifest["privacy"]["stores_normalized_pair_keys"] is True
     with zipfile.ZipFile(path, "r") as archive:
@@ -63,6 +71,62 @@ def test_index_bundle_roundtrip_when_native_available(tmp_path: Path) -> None:
     assert result.exposures[0].pair_exact is True
 
 
+def test_verify_index_bundle_checks_hashes_and_native_invariants(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    train_src = ["abcdef", "uvwxyz", "abcxyz"]
+    train_tgt = ["alpha", "omega", "mixed"]
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    path = tmp_path / "train.tameidx"
+    save_index_bundle(path, train_src, train_tgt, config)
+
+    verification = verify_index_bundle(
+        path,
+        config=config,
+        train_src=train_src,
+        train_tgt=train_tgt,
+    )
+    payload = verification.to_dict()
+
+    assert payload["format"] == "tameidx"
+    assert payload["num_train"] == 3
+    assert verification.train_src_matches is True
+    assert verification.train_tgt_matches is True
+    assert "source_index_sha256" in verification.checked_hashes
+    assert "train_src_normalized_sha256" in verification.checked_hashes
+    assert "train_tgt_normalized_sha256" in verification.checked_hashes
+    assert "target.index.bin" in verification.checked_native_indexes
+
+
+def test_verify_index_bundle_rejects_tampered_member_hash(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+    _copy_bundle_with_member_override(bad_path, path, "train.src", b"abcdeg\n")
+
+    with pytest.raises(ConfigurationError, match="hash mismatch for train_src_sha256"):
+        verify_index_bundle(bad_path)
+
+
+def test_exact_pair_key_member_is_deterministic(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    first = tmp_path / "first.tameidx"
+    second = tmp_path / "second.tameidx"
+    train_src = ["same source", "same source", "other source"]
+    train_tgt = ["target b", "target a", "target c"]
+
+    save_index_bundle(first, train_src, train_tgt, config)
+    save_index_bundle(second, train_src, train_tgt, config)
+
+    with (
+        zipfile.ZipFile(first, "r") as first_archive,
+        zipfile.ZipFile(second, "r") as second_archive,
+    ):
+        assert first_archive.read("exact_pairs.keys") == second_archive.read("exact_pairs.keys")
+
+
 def test_index_bundle_rejects_incompatible_backend_mode(tmp_path: Path) -> None:
     pytest.importorskip("tame_mt._native")
     path = tmp_path / "train.tameidx"
@@ -74,7 +138,13 @@ def test_index_bundle_rejects_incompatible_backend_mode(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ConfigurationError, match="backend is native_exact"):
-        load_index_bundle(path, ScoreConfig(index=IndexConfig(mode="native_fast")))
+        load_index_bundle(
+            path,
+            ScoreConfig(
+                index=IndexConfig(mode="native_fast"),
+                retrieval=RetrievalConfig(mode="approx", allow_approximate=True),
+            ),
+        )
 
 
 def test_scorer_rejects_bundle_loaded_with_different_config(tmp_path: Path) -> None:
@@ -350,6 +420,20 @@ def _copy_bundle_with_extra_member(
         for item in source.infolist():
             target.writestr(item, source.read(item.filename))
         target.writestr(member_name, payload)
+
+
+def _copy_bundle_with_member_override(
+    target_path: Path,
+    source_path: Path,
+    member_name: str,
+    payload: bytes,
+) -> None:
+    with zipfile.ZipFile(source_path, "r") as source, zipfile.ZipFile(target_path, "w") as target:
+        for item in source.infolist():
+            if item.filename == member_name:
+                target.writestr(item, payload)
+            else:
+                target.writestr(item, source.read(item.filename))
 
 
 def _merge_manifest_overrides(

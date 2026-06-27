@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hunterschep/TAME-MT/schemas/segment_diagnostic.v1.schema.json",
+  "title": "TAME-MT segment diagnostic row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "index",
+    "source_exposure",
+    "source_nn_index",
+    "source_exact",
+    "target_exposure",
+    "target_nn_index",
+    "target_ref_index",
+    "target_exact",
+    "pair_exposure",
+    "pair_nn_index",
+    "pair_ref_index",
+    "pair_exact",
+    "bin",
+    "tm_source_index",
+    "tm_source_similarity"
+  ],
+  "properties": {
+    "index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_exposure": {
+      "type": "number"
+    },
+    "source_nn_index": {
+      "$ref": "#/$defs/nullableIndex"
+    },
+    "source_exact": {
+      "type": "boolean"
+    },
+    "target_exposure": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "target_nn_index": {
+      "$ref": "#/$defs/nullableIndex"
+    },
+    "target_ref_index": {
+      "$ref": "#/$defs/nullableIndex"
+    },
+    "target_exact": {
+      "$ref": "#/$defs/nullableBoolean"
+    },
+    "pair_exposure": {
+      "$ref": "#/$defs/nullableNumber"
+    },
+    "pair_nn_index": {
+      "$ref": "#/$defs/nullableIndex"
+    },
+    "pair_ref_index": {
+      "$ref": "#/$defs/nullableIndex"
+    },
+    "pair_exact": {
+      "$ref": "#/$defs/nullableBoolean"
+    },
+    "bin": {
+      "enum": ["source_exact", "near", "medium", "far"]
+    },
+    "tm_source_index": {
+      "$ref": "#/$defs/nullableIndex"
+    },
+    "tm_source_similarity": {
+      "type": "number"
+    },
+    "tm_hyp": {
+      "type": "string"
+    },
+    "source_text": {
+      "type": "string"
+    },
+    "reference_text": {
+      "type": "string"
+    },
+    "reference_texts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hyp_text": {
+      "type": "string"
+    },
+    "neighbor_source_text": {
+      "type": "string"
+    },
+    "neighbor_target_text": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "nullableNumber": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableIndex": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableBoolean": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

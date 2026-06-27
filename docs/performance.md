@@ -4,23 +4,36 @@ TAME-MT is more expensive than BLEU because it compares each test segment to a
 training corpus. BLEU scores only hypothesis/reference files. TAME-MT also asks
 which training segment is closest to each test source and reference.
 
-## Backends
+Every report includes a `performance` object with backend, thread count,
+index-reuse status, available stage timings, and peak RSS. For full command
+timings, including output writing, pass `--profile-json profile.json` to the CLI
+command. Benchmark tables should include the report signature and the profile
+artifact when possible.
 
-| Backend | Exact nearest neighbor | Native | Intended use |
-| --- | --- | --- | --- |
-| `native_exact` | Yes | Yes | Exact audits on small and medium corpora. |
-| `native_fast` | No | Yes | Large public corpora and repeated evaluation workflows. |
-| `python_exact` | Yes | No | Debugging and parity checks. |
-| `python_fast` | No | No | Fallback when native wheels are unavailable. |
+## Retrieval Engine
 
-`auto` chooses `native_exact` up to `--auto-exact-cutoff` and `native_fast`
-above it when the native extension is installed. Without the extension, `auto`
-falls back to the corresponding Python backend.
+| Mode | Exact nearest neighbor | Intended use |
+| --- | --- | --- |
+| `auto` | Yes | Default production mode; requires Rust and resolves to `native_exact`. |
+| `native_exact` | Yes | Explicit exact audits when nearest-neighbor exposure must be exact. |
+| `native_fast` | No | Explicit approximate exploratory runs and recall-characterized workflows. |
 
-Fast backends are approximate for nearest-neighbor retrieval. They select rare
-query n-grams, read bounded postings, keep a bounded candidate set, and rerank
-that shortlist with exact Jaccard similarity. Exact source, target, and pair
-overlap rates remain exact.
+The Rust extension is the only retrieval engine. A missing native backend is an
+installation error, not a production fallback. Approximate `native_fast` must be
+requested with `--retrieval approx --allow-approximate`.
+
+`native_fast` is approximate for nearest-neighbor retrieval. It selects rare
+query n-grams, reads bounded postings, keeps a bounded candidate set, and reranks
+that shortlist with exact Jaccard similarity. Exact source and exact pair
+overlap flags remain exact, but approximate SourceExposure/TargetExposure,
+TM-BLEU, and PairLeakTopK are candidate-set estimates.
+
+For speed-critical exploratory runs, add `--validate-approx-sample N`. TAME-MT
+reruns a deterministic test-segment sample with exact `native_exact` retrieval,
+records an `approx_validation` block in the report, and fails the command when
+agreement drops below the built-in release thresholds. This is a corpus-specific
+guardrail for fast mode; exact mode remains the required choice for canonical
+paper-facing numbers.
 
 Release acceptance includes `benchmarks/validate_fast_recall.py`, which compares
 fast retrieval with exact retrieval on deterministic domain-template,
@@ -85,11 +98,18 @@ training-corpus retrieval has already been done.
 
 ## Local Smoke Timing
 
-On the local development machine, OPUS-100 `de-en` capped at 50,000 train pairs
-and 2,000 test pairs completed as follows:
+On the local development machine, exact-default and approximate smoke runs
+completed as follows. These are not universal performance claims; use them to
+understand the cost profile and always report the full TAME-MT signature with
+benchmark numbers.
 
 | Step | Backend | Time |
 | --- | --- | ---: |
+| Synthetic 100k train / 2k test, fresh audit | `native_exact` | ~35.0s |
+| Synthetic 100k train / 2k test, one-time compressed index build | `native_exact` | ~4.0s |
+| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_exact`, reused index | ~43.2s |
+| Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.5s |
+| Synthetic 100k train / 2k test, prepared cached hypothesis scoring | cached diagnostics | ~0.2s |
 | Public demo after download cache | `native_fast` | ~5.7s |
 | Direct CLI audit on prepared files | `native_fast` | ~6.4s |
 | `score-cached` for one hypothesis | cached diagnostics | ~1.8s |
@@ -97,9 +117,9 @@ and 2,000 test pairs completed as follows:
 | OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
 | OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
 | OPUS-100 `de-en`, 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.5s |
-| Synthetic 100k train / 2k test, one-time compressed index build | `native_fast` | ~3.5s |
-| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~0.9s |
+| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.8s |
+| Synthetic 100k train / 2k test, one-time compressed index build | `native_fast` | ~4.0s |
+| Synthetic 100k train / 2k test, load + audit from `.tameidx` | `native_fast`, reused index | ~2.4s |
 | Synthetic 100k train / 2k test, cached hypothesis scoring | cached diagnostics | ~0.4s |
 | Synthetic 100k train / 2k test, prepare cached scorer | cached diagnostics | ~0.3s |
 | Synthetic 100k train / 2k test, prepared cached hypothesis scoring | cached diagnostics | ~0.2s |
@@ -110,10 +130,10 @@ and 2,000 test pairs completed as follows:
 | Synthetic 100k train / 10k test, cached hypothesis scoring | cached diagnostics | ~2.2s |
 | Synthetic 100k train / 10k test, prepared cached hypothesis scoring | cached diagnostics | ~0.8s |
 
-These numbers are smoke timings, not universal performance claims. Report the
-machine, corpus size, backend, and full TAME-MT signature for benchmark tables.
+When publishing benchmark tables, report the machine, corpus size, backend, and
+full TAME-MT signature.
 The synthetic 100k source+target `.tameidx` bundle in the table above is about
-67 MB with low-compression ZIP storage. The same payload was about 323 MB when
+78 MB with low-compression ZIP storage. The same payload was about 323 MB when
 stored uncompressed, so acceptance checks now include a bundle-size ceiling as
 well as runtime ceilings.
 

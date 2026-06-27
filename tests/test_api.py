@@ -6,7 +6,9 @@ import tame_mt
 from tame_mt import (
     BinConfig,
     CachedSegmentScorer,
+    IndexVerification,
     MetricConfig,
+    RetrievalConfig,
     ScoreConfig,
     SegmentExposure,
     SegmentTMResult,
@@ -15,30 +17,38 @@ from tame_mt import (
     read_segment_metadata,
     segment_metadata_path,
     validate_segment_metadata,
+    verify_index_bundle,
 )
 from tame_mt.exceptions import InputDataError
+from tame_mt.version import __version__
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_public_api_exports_cached_scoring_types() -> None:
     assert CachedSegmentScorer.__name__ == "CachedSegmentScorer"
+    assert IndexVerification.__name__ == "IndexVerification"
     assert MetricConfig.__name__ == "MetricConfig"
+    assert RetrievalConfig.__name__ == "RetrievalConfig"
     assert SegmentExposure.__name__ == "SegmentExposure"
     assert SegmentTMResult.__name__ == "SegmentTMResult"
     assert read_segment_jsonl.__name__ == "read_segment_jsonl"
     assert read_segment_metadata.__name__ == "read_segment_metadata"
     assert segment_metadata_path.__name__ == "segment_metadata_path"
     assert validate_segment_metadata.__name__ == "validate_segment_metadata"
+    assert verify_index_bundle.__name__ == "verify_index_bundle"
     for name in (
         "CachedSegmentScorer",
+        "IndexVerification",
         "MetricConfig",
+        "RetrievalConfig",
         "SegmentExposure",
         "SegmentTMResult",
         "read_segment_jsonl",
         "read_segment_metadata",
         "segment_metadata_path",
         "validate_segment_metadata",
+        "verify_index_bundle",
     ):
         assert name in tame_mt.__all__
 
@@ -55,7 +65,7 @@ def test_score_files_produces_report() -> None:
     assert report.num_test == 4
     assert report.exposure.source["max"] == 1.0
     assert report.tm_scores["bleu"] is not None
-    assert report.signature.startswith("tame-mt|v:0.1.0|")
+    assert report.signature.startswith(f"tame-mt|v:{__version__}|")
 
 
 def test_audit_without_system_scores_does_not_warn_about_gengap() -> None:

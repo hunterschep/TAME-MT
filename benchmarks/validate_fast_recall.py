@@ -34,10 +34,10 @@ def main() -> int:
     args = parser.parse_args()
 
     status = native_status()
-    if args.require_native and not status.available:
+    if not status.available:
         raise SystemExit(f"native backend is required for this validation: {status.error}")
-    exact_mode = "native_exact" if status.available else "python_exact"
-    fast_mode = "native_fast" if status.available else "python_fast"
+    exact_mode = "native_exact"
+    fast_mode = "native_fast"
 
     payload = {
         "exact_mode": exact_mode,

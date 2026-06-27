@@ -25,6 +25,7 @@ def build_signature(config: ScoreConfig, backend_name: str | None = None) -> str
     sacrebleu_version = dependency_versions()["sacrebleu"]
     return (
         f"tame-mt|v:{__version__}|norm:{norm}|sim:char_jaccard_{orders}_set|"
+        f"retrieval:{config.retrieval.mode}|approx:{int(config.retrieval.mode == 'approx')}|"
         f"idx:{config.index.mode}|backend:{backend}|tm:src_nn_top1_zero_{config.tm.zero_policy}|"
         f"bins:far{config.bins.far_threshold:.2f}_near{config.bins.near_threshold:.2f}_leak{leaks}|"
         f"pair_k:{config.index.topk}|fast:{config.index.candidate_gram_limit},"
@@ -46,6 +47,7 @@ def config_to_dict(config: ScoreConfig) -> dict[str, Any]:
             "type": config.similarity.similarity,
             "ngram_orders": list(config.similarity.ngram_orders),
         },
+        "retrieval": asdict(config.retrieval),
         "index": asdict(config.index),
         "bins": {
             "far_threshold": config.bins.far_threshold,
@@ -90,14 +92,20 @@ def render_text_report(report: TameReport) -> str:
 
 def _render_backend(report: TameReport) -> list[str]:
     backend = report.backend
+    retrieval = report.retrieval
     exactness = "exact" if backend.get("exact") else "approximate"
-    native = "native" if backend.get("native") else "python"
+    engine = "rust" if backend.get("native") else "cached artifact"
     return [
         "Backend",
         "-------",
         f"Name:            {backend.get('name', 'unknown')}",
-        f"Engine:          {native}",
+        f"Engine:          {engine}",
         f"Retrieval:       {exactness}",
+        f"Mode:            {retrieval.mode}",
+        f"Source exposure: {retrieval.source_exposure_mode}",
+        f"Target exposure: {retrieval.target_exposure_mode}",
+        f"Pair exposure:   {retrieval.pair_exposure_mode}",
+        f"TM retrieval:    {'exact' if retrieval.tm_retrieval_exact else 'approximate'}",
         "",
     ]
 
@@ -117,10 +125,26 @@ def segment_metadata_path(path: str | Path) -> Path:
     return Path(f"{path}{SEGMENT_METADATA_SUFFIX}")
 
 
-def write_segment_metadata(path: str | Path, report: TameReport) -> None:
+def write_segment_metadata(
+    path: str | Path,
+    report: TameReport,
+    *,
+    fingerprints: dict[str, Any] | None = None,
+    tm_text_included: bool = True,
+    neighbor_text_included: bool = False,
+) -> None:
     output_path = Path(path)
     try:
-        payload = strict_json_dumps(_segment_metadata_payload(report), ensure_ascii=False, indent=2)
+        payload = strict_json_dumps(
+            _segment_metadata_payload(
+                report,
+                fingerprints=fingerprints,
+                tm_text_included=tm_text_included,
+                neighbor_text_included=neighbor_text_included,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
     except ValueError as exc:
         raise OutputError(f"failed to serialize segment metadata: {exc}") from exc
     ensure_parent_dir(output_path)
@@ -141,6 +165,7 @@ def write_segment_jsonl(
     include_source_text: bool = False,
     include_reference_text: bool = False,
     include_hyp_text: bool = False,
+    include_tm_text: bool = True,
 ) -> None:
     tm_by_index = {result.index: result for result in tm_results}
     output_path = Path(path)
@@ -164,8 +189,9 @@ def write_segment_jsonl(
                 "bin": segment.bin,
                 "tm_source_index": tm_result.tm_source_index if tm_result else None,
                 "tm_source_similarity": tm_result.tm_source_similarity if tm_result else None,
-                "tm_hyp": tm_result.tm_hyp if tm_result else "",
             }
+            if include_tm_text:
+                payload["tm_hyp"] = tm_result.tm_hyp if tm_result else ""
             if include_source_text:
                 payload["source_text"] = test_src[segment.index]
             if include_reference_text and refs:
@@ -189,7 +215,13 @@ def write_segment_jsonl(
             handle.write(line + "\n")
 
 
-def _segment_metadata_payload(report: TameReport) -> dict[str, Any]:
+def _segment_metadata_payload(
+    report: TameReport,
+    *,
+    fingerprints: dict[str, Any] | None,
+    tm_text_included: bool,
+    neighbor_text_included: bool,
+) -> dict[str, Any]:
     return {
         "schema_version": "0.1",
         "artifact": "segment_jsonl",
@@ -200,8 +232,15 @@ def _segment_metadata_payload(report: TameReport) -> dict[str, Any]:
             "num_test": report.num_test,
             "num_refs": report.num_refs,
         },
+        "retrieval": asdict(report.retrieval),
         "config": report.config,
         "backend": report.backend,
+        "privacy": {
+            "tm_text_included": tm_text_included,
+            "contains_training_target_text": tm_text_included,
+            "contains_neighbor_training_text": neighbor_text_included,
+        },
+        "fingerprints": fingerprints or {},
     }
 
 
@@ -242,7 +281,9 @@ def _render_exposure(report: TameReport) -> list[str]:
     if report.exposure.target is not None:
         lines.extend(_render_exposure_side("Target exposure", report.exposure.target))
     if report.exposure.pair is not None:
-        lines.extend(_render_pair_exposure(report.exposure.pair))
+        lines.extend(
+            _render_pair_exposure(report.exposure.pair, report.retrieval.pair_exposure_mode)
+        )
     lines.append("")
     return lines
 
@@ -264,12 +305,13 @@ def _render_exposure_side(title: str, stats: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _render_pair_exposure(stats: dict[str, Any]) -> list[str]:
+def _render_pair_exposure(stats: dict[str, Any], pair_mode: str) -> list[str]:
     lines = ["Pair exposure:"]
     lines.append(f"  exact overlap:    {_fmt_pct(stats.get('exact_overlap'))}")
     thresholds = stats.get("at_threshold") or {}
+    label = "PairLeakTopK" if "topk" in pair_mode else "PairLeak"
     for threshold, value in thresholds.items():
-        lines.append(f"  PairLeak@{threshold}:   {_fmt_pct(value)}")
+        lines.append(f"  {label}@{threshold}:   {_fmt_pct(value)}")
     lines.append("")
     return lines
 

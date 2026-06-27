@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,19 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_static_package_versions_match() -> None:
     assert _metadata_version(ROOT / "pyproject.toml") == __version__
     assert _metadata_version(ROOT / "Cargo.toml") == __version__
+
+
+def test_release_version_check_script_passes() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/check_versions.py"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert __version__ in result.stdout
 
 
 def test_native_version_matches_python_version_when_available() -> None:

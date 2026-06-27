@@ -4,6 +4,7 @@ import io
 import tempfile
 import zipfile
 from dataclasses import asdict, dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
 
@@ -14,11 +15,12 @@ from tame_mt.index import NgramInvertedIndex
 from tame_mt.io import ensure_parent_dir, validate_equal_lengths
 from tame_mt.json_utils import strict_json_dumps, strict_json_loads
 from tame_mt.native import native_index_from_bytes
+from tame_mt.normalize import normalize_text
 from tame_mt.report import config_to_dict
 from tame_mt.version import __version__
 
 INDEX_FORMAT = "tameidx"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 NATIVE_INDEX_SCHEMA_VERSION = 3
 
 MANIFEST_NAME = "manifest.json"
@@ -49,6 +51,34 @@ class IndexBundle:
     target_index: NgramInvertedIndex | None
     exact_pair_keys: set[str] | None
     manifest: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class IndexVerification:
+    """Summary returned by index-bundle verification."""
+
+    manifest: dict[str, Any]
+    checked_members: list[str]
+    checked_hashes: list[str]
+    checked_native_indexes: list[str]
+    train_src_matches: bool | None = None
+    train_tgt_matches: bool | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "format": self.manifest.get("format"),
+            "format_version": self.manifest.get("format_version"),
+            "tame_version": self.manifest.get("tame_version"),
+            "num_train": self.manifest.get("num_train"),
+            "has_target": self.manifest.get("has_target"),
+            "source_backend": self.manifest.get("source_backend"),
+            "target_backend": self.manifest.get("target_backend"),
+            "checked_members": self.checked_members,
+            "checked_hashes": self.checked_hashes,
+            "checked_native_indexes": self.checked_native_indexes,
+            "train_src_matches": self.train_src_matches,
+            "train_tgt_matches": self.train_tgt_matches,
+        }
 
 
 def save_index_bundle(
@@ -156,6 +186,7 @@ def load_index_bundle(
             manifest = _read_manifest(archive)
             _validate_manifest(manifest, config)
             _validate_archive_members(archive, manifest, max_load_bytes=max_load_bytes)
+            _validate_archive_hashes(archive, manifest, config=config)
             has_target = _manifest_bool(manifest, "has_target")
             train_src = _read_lines_member(archive, TRAIN_SRC_NAME)
             train_tgt = _read_lines_member(archive, TRAIN_TGT_NAME) if has_target else None
@@ -218,6 +249,50 @@ def inspect_index_bundle(path: str | Path) -> dict[str, Any]:
         raise ConfigurationError("index bundle is not a valid zip file") from exc
 
 
+def verify_index_bundle(
+    path: str | Path,
+    *,
+    config: ScoreConfig | None = None,
+    train_src: list[str] | None = None,
+    train_tgt: list[str] | None = None,
+    max_load_bytes: int | None = MAX_BUNDLE_LOAD_BYTES,
+) -> IndexVerification:
+    """Verify a `.tameidx` bundle without constructing a scoring bundle."""
+
+    _validate_max_load_bytes(max_load_bytes)
+    try:
+        with zipfile.ZipFile(Path(path), mode="r") as archive:
+            manifest = _read_manifest(archive)
+            if config is None:
+                _validate_manifest_format(manifest)
+            else:
+                _validate_manifest(manifest, config)
+            checked_members = _validate_archive_members(
+                archive,
+                manifest,
+                max_load_bytes=max_load_bytes,
+            )
+            checked_hashes = _validate_archive_hashes(archive, manifest, config=config)
+            checked_native_indexes = _verify_native_index_members(archive, manifest)
+            train_src_matches, train_tgt_matches = _verify_supplied_training_hashes(
+                manifest,
+                train_src=train_src,
+                train_tgt=train_tgt,
+                config=config,
+            )
+    except zipfile.BadZipFile as exc:
+        raise ConfigurationError("index bundle is not a valid zip file") from exc
+
+    return IndexVerification(
+        manifest=manifest,
+        checked_members=checked_members,
+        checked_hashes=checked_hashes,
+        checked_native_indexes=checked_native_indexes,
+        train_src_matches=train_src_matches,
+        train_tgt_matches=train_tgt_matches,
+    )
+
+
 def _build_manifest(
     train_src: list[str],
     train_tgt: list[str] | None,
@@ -254,6 +329,15 @@ def _build_manifest(
                 len(exact_pair_keys_bytes) if exact_pair_keys_bytes is not None else 0
             ),
         },
+        "hashes": _build_manifest_hashes(
+            train_src=train_src,
+            train_tgt=train_tgt,
+            source_normalized=source_index.normalized_lines,
+            target_normalized=target_index.normalized_lines if target_index is not None else None,
+            source_index_bytes=source_index_bytes,
+            target_index_bytes=target_index_bytes,
+            exact_pair_keys_bytes=exact_pair_keys_bytes,
+        ),
         "privacy": {
             "stores_raw_training_text": True,
             "stores_normalized_exact_match_keys": True,
@@ -266,6 +350,32 @@ def _backend_to_dict(index: NgramInvertedIndex | None) -> dict[str, Any]:
     if index is None:
         return {}
     return cast(dict[str, Any], _jsonable(asdict(index.backend_info)))
+
+
+def _build_manifest_hashes(
+    *,
+    train_src: list[str],
+    train_tgt: list[str] | None,
+    source_normalized: list[str],
+    target_normalized: list[str] | None,
+    source_index_bytes: bytes,
+    target_index_bytes: bytes | None,
+    exact_pair_keys_bytes: bytes | None,
+) -> dict[str, str]:
+    hashes = {
+        "train_src_sha256": _hash_lines(train_src),
+        "train_src_normalized_sha256": _hash_lines(source_normalized),
+        "source_index_sha256": _sha256_bytes(source_index_bytes),
+    }
+    if train_tgt is not None:
+        hashes["train_tgt_sha256"] = _hash_lines(train_tgt)
+    if target_normalized is not None:
+        hashes["train_tgt_normalized_sha256"] = _hash_lines(target_normalized)
+    if target_index_bytes is not None:
+        hashes["target_index_sha256"] = _sha256_bytes(target_index_bytes)
+    if exact_pair_keys_bytes is not None:
+        hashes["exact_pair_keys_sha256"] = _sha256_bytes(exact_pair_keys_bytes)
+    return hashes
 
 
 def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
@@ -287,6 +397,11 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
 
 
 def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
+    _validate_manifest_format(manifest)
+    _validate_manifest_compatibility(manifest, config)
+
+
+def _validate_manifest_format(manifest: dict[str, Any]) -> None:
     if manifest.get("format") != INDEX_FORMAT:
         raise ConfigurationError("not a TAME-MT index bundle")
     format_version = _manifest_int(manifest, "format_version")
@@ -304,7 +419,15 @@ def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
             f"{native_schema_version}; rebuild the .tameidx file with the "
             "current TAME-MT version"
         )
+    _manifest_int(manifest, "num_train")
+    _manifest_bool(manifest, "has_target")
+    _backend_manifest(manifest, "source_backend")
+    if _manifest_bool(manifest, "has_target"):
+        _backend_manifest(manifest, "target_backend")
+    _hashes_manifest(manifest)
 
+
+def _validate_manifest_compatibility(manifest: dict[str, Any], config: ScoreConfig) -> None:
     expected_normalization = _jsonable(asdict(config.normalization))
     expected_similarity = {
         "type": config.similarity.similarity,
@@ -336,40 +459,150 @@ def _validate_archive_members(
     manifest: dict[str, Any],
     *,
     max_load_bytes: int | None,
-) -> None:
+) -> list[str]:
     storage = _storage_manifest(manifest)
     has_target = _manifest_bool(manifest, "has_target")
 
     _validate_archive_shape(archive, has_target=has_target)
+    checked_members = [MANIFEST_NAME]
     _validate_text_member(archive, TRAIN_SRC_NAME)
+    checked_members.append(TRAIN_SRC_NAME)
     _validate_member_size(
         archive,
         SOURCE_INDEX_NAME,
         _positive_storage_int(storage, "source_index_bytes"),
         max_size=MAX_NATIVE_INDEX_BYTES,
     )
+    checked_members.append(SOURCE_INDEX_NAME)
 
     target_index_bytes = _storage_int(storage, "target_index_bytes")
     exact_pair_keys_bytes = _storage_int(storage, "exact_pair_keys_bytes")
     if has_target:
         _validate_text_member(archive, TRAIN_TGT_NAME)
+        checked_members.append(TRAIN_TGT_NAME)
         _validate_member_size(
             archive,
             TARGET_INDEX_NAME,
             _positive_storage_int(storage, "target_index_bytes"),
             max_size=MAX_NATIVE_INDEX_BYTES,
         )
+        checked_members.append(TARGET_INDEX_NAME)
         _validate_member_size(
             archive,
             EXACT_PAIR_KEYS_NAME,
             _positive_storage_int(storage, "exact_pair_keys_bytes"),
             max_size=MAX_EXACT_PAIR_KEYS_BYTES,
         )
+        checked_members.append(EXACT_PAIR_KEYS_NAME)
     elif target_index_bytes != 0 or exact_pair_keys_bytes != 0:
         raise ConfigurationError(
             "index bundle manifest has target storage bytes but has_target is false"
         )
     _validate_load_budget(archive, has_target=has_target, max_load_bytes=max_load_bytes)
+    return checked_members
+
+
+def _validate_archive_hashes(
+    archive: zipfile.ZipFile,
+    manifest: dict[str, Any],
+    *,
+    config: ScoreConfig | None = None,
+) -> list[str]:
+    hashes = _hashes_manifest(manifest)
+    checked: list[str] = []
+    train_src = _read_lines_member(archive, TRAIN_SRC_NAME)
+    _validate_hash(hashes, "train_src_sha256", _hash_lines(train_src))
+    checked.append("train_src_sha256")
+    if config is not None:
+        _validate_hash(
+            hashes,
+            "train_src_normalized_sha256",
+            _hash_lines(_normalized_lines(train_src, config)),
+        )
+        checked.append("train_src_normalized_sha256")
+    _validate_hash(
+        hashes, "source_index_sha256", _sha256_bytes(_read_bytes_member(archive, SOURCE_INDEX_NAME))
+    )
+    checked.append("source_index_sha256")
+    if _manifest_bool(manifest, "has_target"):
+        train_tgt = _read_lines_member(archive, TRAIN_TGT_NAME)
+        _validate_hash(
+            hashes,
+            "train_tgt_sha256",
+            _hash_lines(train_tgt),
+        )
+        checked.append("train_tgt_sha256")
+        if config is not None:
+            _validate_hash(
+                hashes,
+                "train_tgt_normalized_sha256",
+                _hash_lines(_normalized_lines(train_tgt, config)),
+            )
+            checked.append("train_tgt_normalized_sha256")
+        _validate_hash(
+            hashes,
+            "target_index_sha256",
+            _sha256_bytes(_read_bytes_member(archive, TARGET_INDEX_NAME)),
+        )
+        checked.append("target_index_sha256")
+        _validate_hash(
+            hashes,
+            "exact_pair_keys_sha256",
+            _sha256_bytes(
+                _read_member_bytes(
+                    archive,
+                    EXACT_PAIR_KEYS_NAME,
+                    max_size=MAX_EXACT_PAIR_KEYS_BYTES,
+                )
+            ),
+        )
+        checked.append("exact_pair_keys_sha256")
+    return checked
+
+
+def _verify_native_index_members(
+    archive: zipfile.ZipFile,
+    manifest: dict[str, Any],
+) -> list[str]:
+    _load_native_bytes(_read_bytes_member(archive, SOURCE_INDEX_NAME), "source")
+    checked = [SOURCE_INDEX_NAME]
+    if _manifest_bool(manifest, "has_target"):
+        _load_native_bytes(_read_bytes_member(archive, TARGET_INDEX_NAME), "target")
+        checked.append(TARGET_INDEX_NAME)
+    return checked
+
+
+def _verify_supplied_training_hashes(
+    manifest: dict[str, Any],
+    *,
+    train_src: list[str] | None,
+    train_tgt: list[str] | None,
+    config: ScoreConfig | None,
+) -> tuple[bool | None, bool | None]:
+    hashes = _hashes_manifest(manifest)
+    train_src_matches = None
+    train_tgt_matches = None
+    if train_src is not None:
+        _validate_hash(hashes, "train_src_sha256", _hash_lines(train_src))
+        train_src_matches = True
+        if config is not None:
+            _validate_hash(
+                hashes,
+                "train_src_normalized_sha256",
+                _hash_lines(_normalized_lines(train_src, config)),
+            )
+    if train_tgt is not None:
+        if not _manifest_bool(manifest, "has_target"):
+            raise ConfigurationError("--train-tgt was supplied but index bundle has no target side")
+        _validate_hash(hashes, "train_tgt_sha256", _hash_lines(train_tgt))
+        train_tgt_matches = True
+        if config is not None:
+            _validate_hash(
+                hashes,
+                "train_tgt_normalized_sha256",
+                _hash_lines(_normalized_lines(train_tgt, config)),
+            )
+    return train_src_matches, train_tgt_matches
 
 
 def _validate_max_load_bytes(max_load_bytes: int | None) -> None:
@@ -459,6 +692,30 @@ def _storage_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(storage, dict):
         raise ConfigurationError("index bundle manifest is missing storage")
     return cast(dict[str, Any], storage)
+
+
+def _hashes_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    hashes = manifest.get("hashes")
+    if not isinstance(hashes, dict):
+        raise ConfigurationError("index bundle manifest is missing hashes")
+    required = ["train_src_sha256", "source_index_sha256"]
+    if _manifest_bool(manifest, "has_target"):
+        required.extend(["train_tgt_sha256", "target_index_sha256", "exact_pair_keys_sha256"])
+    for key in required:
+        value = hashes.get(key)
+        if not isinstance(value, str) or not _looks_like_sha256(value):
+            raise ConfigurationError(f"index bundle hash {key} must be a SHA-256 hex digest")
+    return cast(dict[str, Any], hashes)
+
+
+def _looks_like_sha256(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def _validate_hash(hashes: dict[str, Any], key: str, actual: str) -> None:
+    expected = hashes.get(key)
+    if expected != actual:
+        raise ConfigurationError(f"index bundle hash mismatch for {key}")
 
 
 def _storage_int(storage: dict[str, Any], key: str) -> int:
@@ -628,7 +885,7 @@ def _encode_lines(lines: list[str]) -> bytes:
 
 def _encode_exact_pair_keys(keys: set[str]) -> bytes:
     payload = bytearray()
-    for key in keys:
+    for key in sorted(keys):
         encoded = key.encode("utf-8")
         payload.extend(len(encoded).to_bytes(8, byteorder="little", signed=False))
         payload.extend(encoded)
@@ -654,6 +911,23 @@ def _decode_exact_pair_keys(payload: bytes) -> set[str]:
 
 def _jsonable(value: Any) -> Any:
     return strict_json_loads(strict_json_dumps(value, ensure_ascii=False))
+
+
+def _hash_lines(lines: list[str]) -> str:
+    digest = sha256()
+    for line in lines:
+        encoded = line.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, byteorder="big", signed=False))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _normalized_lines(lines: list[str], config: ScoreConfig) -> list[str]:
+    return [normalize_text(line, config.normalization) for line in lines]
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return sha256(payload).hexdigest()
 
 
 def _temporary_bundle_path(output_path: Path) -> Path:

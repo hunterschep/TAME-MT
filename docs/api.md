@@ -27,7 +27,9 @@ report.exposure
 report.bins
 report.generalization_gap
 report.warnings
+report.retrieval
 report.backend
+report.performance
 report.signature
 ```
 
@@ -75,7 +77,13 @@ For repeated runs over the same training corpus, build and save a native index
 bundle:
 
 ```python
-from tame_mt import ScoreConfig, TameScorer, load_index_bundle, save_index_bundle
+from tame_mt import (
+    ScoreConfig,
+    TameScorer,
+    load_index_bundle,
+    save_index_bundle,
+    verify_index_bundle,
+)
 
 config = ScoreConfig()
 save_index_bundle(
@@ -101,6 +109,17 @@ It also enforces a default uncompressed load-memory budget before reading raw
 training text, native index bytes, or exact-pair keys into memory. Pass
 `max_load_bytes=...` only for trusted large bundles on machines with enough
 RAM, or `max_load_bytes=None` to disable that guard deliberately.
+
+Use `verify_index_bundle()` to validate a bundle before reuse or transfer:
+
+```python
+verification = verify_index_bundle(
+    "train.tameidx",
+    train_src=train_src_lines,
+    train_tgt=train_tgt_lines,
+)
+print(verification.to_dict()["checked_hashes"])
+```
 
 Index bundles store raw training text and normalized exact-match and pair keys.
 Treat them as training data.
@@ -190,23 +209,30 @@ validates it on cached CLI runs. Python callers can use the same helpers:
 from tame_mt import read_segment_metadata, segment_metadata_path, validate_segment_metadata
 
 metadata = read_segment_metadata("segments.jsonl")
-if metadata is not None:
-    validate_segment_metadata(
-        metadata,
-        config=config,
-        num_train=125000,
-        num_test=len(exposures),
-        num_refs=len(refs),
-    )
+if metadata is None:
+    raise RuntimeError("cached scoring requires segment metadata")
+
+validate_segment_metadata(
+    metadata,
+    config=config,
+    num_train=125000,
+    num_test=len(exposures),
+    num_refs=len(refs),
+    refs=refs,
+    tm_results=tm_results,
+    require_tm_text=True,
+)
 
 print(segment_metadata_path("segments.jsonl"))
 ```
 
+Metadata validation checks normalization, similarity, retrieval settings, TM
+zero policy, bin thresholds, reference content hashes, and TM hypothesis hashes.
 When metadata is available, pass its backend into cached scoring so generated
 reports preserve provenance:
 
 ```python
-artifact_backend = metadata["backend"] if metadata is not None else None
+artifact_backend = metadata["backend"]
 
 report = scorer.score_from_artifacts(
     exposures=exposures,
@@ -219,6 +245,11 @@ report = scorer.score_from_artifacts(
 
 print(report.backend["artifact_backend"]["name"])
 ```
+
+Segment JSONL contains TM baseline hypotheses by default. If a segment artifact
+was written with `--no-tm-text-in-segments`, it is useful for private exposure
+diagnostics but cannot be used for cached scoring because TM-BLEU would be
+incorrect.
 
 ## Custom Configuration
 
@@ -234,8 +265,18 @@ config = ScoreConfig(
 )
 ```
 
-Metric-changing configuration, the resolved retrieval backend, and
-metric-affecting dependency versions are recorded in the report signature.
+Metric-changing configuration, retrieval mode, approximation flag, resolved
+backend, and metric-affecting dependency versions are recorded in the report
+signature. Default `ScoreConfig()` uses exact retrieval. Approximate retrieval
+must be requested explicitly:
+
+```python
+from tame_mt import RetrievalConfig, ScoreConfig
+
+config = ScoreConfig(
+    retrieval=RetrievalConfig(mode="approx", allow_approximate=True)
+)
+```
 
 Configuration dataclasses validate both structure and scalar values at
 construction time. Integer settings reject booleans and floats, boolean flags

@@ -8,7 +8,14 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from tame_mt import IndexConfig, ScoreConfig, TameScorer, load_index_bundle, save_index_bundle
+from tame_mt import (
+    IndexConfig,
+    RetrievalConfig,
+    ScoreConfig,
+    TameScorer,
+    load_index_bundle,
+    save_index_bundle,
+)
 from tame_mt.exceptions import TameMTError
 from tame_mt.json_utils import strict_json_dumps
 from tame_mt.native import native_status
@@ -23,6 +30,12 @@ def main() -> int:
     parser.add_argument("--train-size", type=int, default=10_000)
     parser.add_argument("--test-size", type=int, default=500)
     parser.add_argument("--index-mode", default="auto")
+    parser.add_argument("--retrieval", choices=["exact", "guarded", "approx"], default="exact")
+    parser.add_argument(
+        "--allow-approximate",
+        action="store_true",
+        help="allow approximate retrieval for native_fast benchmark runs",
+    )
     parser.add_argument("--max-seconds", type=float, default=None)
     parser.add_argument("--staged", action="store_true", help="also benchmark index reuse stages")
     parser.add_argument("--max-index-build-seconds", type=float, default=None)
@@ -52,7 +65,13 @@ def main() -> int:
         max_seconds = 8.0 if args.small else 60.0
 
     train_src, train_tgt, test_src, refs = make_corpus(train_size, test_size)
-    config = ScoreConfig(index=IndexConfig(mode=args.index_mode))
+    config = ScoreConfig(
+        index=IndexConfig(mode=args.index_mode),
+        retrieval=RetrievalConfig(
+            mode=args.retrieval,
+            allow_approximate=args.allow_approximate,
+        ),
+    )
     scorer = TameScorer(config)
 
     started = time.perf_counter()

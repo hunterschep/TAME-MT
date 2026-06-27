@@ -15,6 +15,7 @@ from tame_mt import (
     read_segment_jsonl,
     read_segment_metadata,
     validate_segment_metadata,
+    verify_index_bundle,
 )
 from tame_mt.native import native_status
 
@@ -72,6 +73,26 @@ def main() -> int:
                 "--quiet",
             ]
         )
+        _run(
+            [
+                "index",
+                "verify",
+                str(tmp / "train.tameidx"),
+                "--train-src",
+                str(gz_inputs["train.src"]),
+                "--train-tgt",
+                str(gz_inputs["train.tgt"]),
+                "--json",
+            ]
+        )
+        verification = verify_index_bundle(
+            tmp / "train.tameidx",
+            config=ScoreConfig(),
+            train_src=_read_gzip_lines(gz_inputs["train.src"]),
+            train_tgt=_read_gzip_lines(gz_inputs["train.tgt"]),
+        )
+        if verification.train_src_matches is not True or verification.train_tgt_matches is not True:
+            raise SystemExit("index verification did not match supplied training files")
         _run(
             [
                 "score",

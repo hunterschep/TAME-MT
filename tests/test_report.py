@@ -4,13 +4,15 @@ from pathlib import Path
 import pytest
 import sacrebleu
 
-from tame_mt import TameScorer
+from tame_mt import RetrievalConfig, ScoreConfig, TameScorer
 from tame_mt.artifacts import read_segment_jsonl
 from tame_mt.exceptions import OutputError
 from tame_mt.report import write_json_report, write_segment_jsonl
+from tame_mt.version import __version__
 
 
 def test_report_to_json_contains_schema_version() -> None:
+    pytest.importorskip("tame_mt._native")
     report = TameScorer().score_corpus(
         train_src=["hello world"],
         train_tgt=["hola mundo"],
@@ -20,13 +22,40 @@ def test_report_to_json_contains_schema_version() -> None:
     )
     payload = json.loads(report.to_json())
     assert payload["schema_version"] == "0.1"
-    assert payload["signature"].startswith("tame-mt|v:0.1.0|")
+    assert payload["signature"].startswith(f"tame-mt|v:{__version__}|")
     assert f"|deps:sacrebleu_{sacrebleu.__version__}" in payload["signature"]
     assert payload["config"]["dependencies"]["sacrebleu"] == sacrebleu.__version__
-    assert payload["backend"]["name"] in {
-        "native_exact",
-        "python_exact",
-    }
+    assert payload["backend"]["name"] == "native_exact"
+    assert payload["retrieval"]["mode"] == "exact"
+    assert payload["retrieval"]["source_exposure_mode"] == "exact"
+    assert payload["retrieval"]["tm_retrieval_exact"] is True
+    assert payload["performance"]["backend"] == "native_exact"
+    assert payload["performance"]["index_reused"] is False
+    assert isinstance(payload["performance"]["threads"], int)
+    assert isinstance(payload["performance"]["timings_sec"], dict)
+    assert "peak_rss_mb" in payload["performance"]["memory"]
+    assert "|retrieval:exact|" in payload["signature"]
+
+
+def test_approximate_report_is_labeled_and_warns() -> None:
+    pytest.importorskip("tame_mt._native")
+    report = TameScorer(
+        ScoreConfig(retrieval=RetrievalConfig(mode="approx", allow_approximate=True))
+    ).score_corpus(
+        train_src=["hello world", "other source"],
+        train_tgt=["hola mundo", "otro"],
+        test_src=["hello"],
+        refs=[["hola"]],
+        hyp=["hola"],
+    )
+    payload = json.loads(report.to_json())
+
+    assert payload["backend"]["name"] == "native_fast"
+    assert payload["retrieval"]["mode"] == "approx"
+    assert payload["retrieval"]["source_exposure_mode"] == "approx"
+    assert payload["retrieval"]["tm_retrieval_exact"] is False
+    assert any("Approximate retrieval is enabled" in warning for warning in payload["warnings"])
+    assert "|retrieval:approx|" in payload["signature"]
 
 
 def test_report_to_json_rejects_non_finite_numbers() -> None:

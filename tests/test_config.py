@@ -4,6 +4,7 @@ from tame_mt import (
     BinConfig,
     IndexConfig,
     NormalizationConfig,
+    RetrievalConfig,
     ScoreConfig,
     SimilarityConfig,
     TMConfig,
@@ -70,6 +71,10 @@ def test_tuple_parsers_reject_empty_components() -> None:
 
 
 def test_config_rejects_invalid_index_and_tm_options() -> None:
+    with pytest.raises(ConfigurationError, match="index mode"):
+        IndexConfig(mode="python_exact")
+    with pytest.raises(ConfigurationError, match="index mode"):
+        IndexConfig(mode="python_fast")
     with pytest.raises(ConfigurationError, match="positive"):
         IndexConfig(topk=0)
     with pytest.raises(ConfigurationError, match="topk"):
@@ -140,3 +145,21 @@ def test_score_config_rejects_wrong_nested_config_types() -> None:
         ScoreConfig(tm="bad")  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="metric"):
         ScoreConfig(metric="bad")  # type: ignore[arg-type]
+
+
+def test_score_config_defaults_to_exact_retrieval() -> None:
+    config = ScoreConfig()
+    assert config.retrieval.mode == "exact"
+    assert config.index.mode == "auto"
+
+
+def test_score_config_rejects_accidental_approximate_backend() -> None:
+    with pytest.raises(ConfigurationError, match="cannot use approximate backend"):
+        ScoreConfig(index=IndexConfig(mode="native_fast"))
+    with pytest.raises(ConfigurationError, match="allow_approximate"):
+        ScoreConfig(retrieval=RetrievalConfig(mode="approx"))
+
+
+def test_score_config_approx_auto_selects_native_fast() -> None:
+    config = ScoreConfig(retrieval=RetrievalConfig(mode="approx", allow_approximate=True))
+    assert config.index.mode == "native_fast"

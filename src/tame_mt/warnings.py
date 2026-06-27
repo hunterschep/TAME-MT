@@ -14,6 +14,13 @@ def generate_warnings(
     num_test: int,
 ) -> list[str]:
     warnings: list[str] = []
+    if config.retrieval.mode == "approx":
+        warnings.append(
+            "Approximate retrieval is enabled. SourceExposure, TargetExposure, TM-BLEU, "
+            "and PairLeakTopK are candidate-set estimates, not canonical exact exposure. "
+            "Validate approximate retrieval before using these values for paper-critical claims."
+        )
+
     pair = exposure.pair or {}
     exact_pair = pair.get("exact_overlap")
     if isinstance(exact_pair, float) and exact_pair > 0:

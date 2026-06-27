@@ -1,0 +1,387 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hunterschep/TAME-MT/schemas/tame_report.v1.schema.json",
+  "title": "TAME-MT report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "tame_version",
+    "signature",
+    "data",
+    "config",
+    "retrieval",
+    "backend",
+    "quality",
+    "exposure",
+    "bins",
+    "generalization_gap",
+    "approx_validation",
+    "performance",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "tame_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["num_train", "num_test", "num_refs"],
+      "properties": {
+        "num_train": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "num_test": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "num_refs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "config": {
+      "type": "object"
+    },
+    "retrieval": {
+      "$ref": "#/$defs/retrieval"
+    },
+    "backend": {
+      "type": "object",
+      "required": ["name", "native", "exact", "requested_mode", "resolved_mode", "index_reused"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "native": {
+          "type": "boolean"
+        },
+        "exact": {
+          "type": "boolean"
+        },
+        "requested_mode": {
+          "type": "string"
+        },
+        "resolved_mode": {
+          "type": "string"
+        },
+        "index_reused": {
+          "type": "boolean"
+        },
+        "artifact_backend": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "tm", "delta_tm"],
+      "properties": {
+        "system": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "tm": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "delta_tm": {
+          "$ref": "#/$defs/scoreMap"
+        }
+      }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "target", "pair"],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/exposureSide"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/exposureSide"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pair": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/exposureSide"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "bins": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bin"
+      }
+    },
+    "generalization_gap": {
+      "$ref": "#/$defs/scoreMap"
+    },
+    "approx_validation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/approxValidation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "performance": {
+      "$ref": "#/$defs/performance"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "nullableNumber": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scoreMap": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/nullableNumber"
+      }
+    },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "source_exposure_mode",
+        "target_exposure_mode",
+        "pair_exposure_mode",
+        "tm_retrieval_exact",
+        "false_negative_safe_thresholds",
+        "approximate"
+      ],
+      "properties": {
+        "mode": {
+          "enum": ["exact", "guarded", "approx"]
+        },
+        "source_exposure_mode": {
+          "type": "string"
+        },
+        "target_exposure_mode": {
+          "type": "string"
+        },
+        "pair_exposure_mode": {
+          "type": "string"
+        },
+        "tm_retrieval_exact": {
+          "type": "boolean"
+        },
+        "false_negative_safe_thresholds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "approximate": {
+          "type": "boolean"
+        }
+      }
+    },
+    "exposureSide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mean",
+        "median",
+        "p05",
+        "p25",
+        "p75",
+        "p95",
+        "max",
+        "exact_overlap",
+        "at_threshold"
+      ],
+      "properties": {
+        "mean": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "median": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "p05": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "p25": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "p75": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "p95": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "max": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "exact_overlap": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "at_threshold": {
+          "$ref": "#/$defs/scoreMap"
+        }
+      }
+    },
+    "bin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "count", "percentage", "mean_source_exposure", "system", "tm", "delta_tm"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "percentage": {
+          "type": "number"
+        },
+        "mean_source_exposure": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "system": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "tm": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "delta_tm": {
+          "$ref": "#/$defs/scoreMap"
+        }
+      }
+    },
+    "approxValidation": {
+      "type": "object",
+      "required": ["sample_size", "seed", "passed", "failures"],
+      "properties": {
+        "sample_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requested_sample_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "exact_mode": {
+          "type": "string"
+        },
+        "sample_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "source_top1_agreement": {
+          "type": "number"
+        },
+        "source_bin_agreement": {
+          "type": "number"
+        },
+        "source_mean_abs_error": {
+          "type": "number"
+        },
+        "source_p95_abs_error": {
+          "type": "number"
+        },
+        "target_top1_agreement": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "pair_threshold_agreement": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "tm_bleu_abs_delta_on_sample": {
+          "$ref": "#/$defs/nullableNumber"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "threads", "index_reused", "timings_sec", "memory"],
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "threads": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index_reused": {
+          "type": "boolean"
+        },
+        "timings_sec": {
+          "$ref": "#/$defs/scoreMap"
+        },
+        "memory": {
+          "$ref": "#/$defs/scoreMap"
+        }
+      }
+    }
+  }
+}

@@ -12,15 +12,18 @@ from tame_mt.config import (
     IndexConfig,
     MetricConfig,
     NormalizationConfig,
+    RetrievalConfig,
     ScoreConfig,
     SimilarityConfig,
     TMConfig,
 )
 from tame_mt.persistence import (
     IndexBundle,
+    IndexVerification,
     inspect_index_bundle,
     load_index_bundle,
     save_index_bundle,
+    verify_index_bundle,
 )
 from tame_mt.schema import SegmentExposure, SegmentTMResult, TameReport
 from tame_mt.version import __version__
@@ -32,12 +35,14 @@ __all__ = [
     "CachedSegmentScorer",
     "IndexConfig",
     "IndexBundle",
+    "IndexVerification",
     "inspect_index_bundle",
     "load_index_bundle",
     "MetricConfig",
     "NormalizationConfig",
     "read_segment_jsonl",
     "read_segment_metadata",
+    "RetrievalConfig",
     "score",
     "ScoreConfig",
     "save_index_bundle",
@@ -49,4 +54,5 @@ __all__ = [
     "TameScorer",
     "TMConfig",
     "validate_segment_metadata",
+    "verify_index_bundle",
 ]

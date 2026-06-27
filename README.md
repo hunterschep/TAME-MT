@@ -87,7 +87,7 @@ analysis. It is a training-aware layer around corpus evaluation.
 | `SourceExposure` | For each test source, similarity to the closest training source. |
 | `TargetExposure` | For each reference, similarity to the closest training target. |
 | `PairExposure` | Whether a test source/reference pair is close to the same training source/target pair. |
-| `PairLeak@0.85` | Fraction of test pairs with pair exposure at least `0.85`. |
+| `PairLeakTopK@0.85` | Fraction of test pairs whose top-k pair-reranked exposure is at least `0.85`. |
 | `source_exact` | Test source exactly appears in normalized training sources. |
 | `pair_exact` | Test source and reference exactly appear as a normalized training pair. |
 | `Far-BLEU`, `Far-chrF` | Quality on test examples far from the training source corpus. |
@@ -100,7 +100,7 @@ The shortest interpretation is:
 - high delta over TM means the system is doing more than that baseline;
 - strong far-bin scores are better evidence of generalization than strong
   near-bin scores alone;
-- high PairLeak or exact-pair overlap should be reported next to raw MT scores.
+- high PairLeakTopK or exact-pair overlap should be reported next to raw MT scores.
 
 ## Installation
 
@@ -114,10 +114,21 @@ Check that the package and native backend are available:
 tame-mt doctor
 ```
 
+Published wheels include the Rust backend. If `doctor` reports `Native backend:
+unavailable`, the install is incomplete and the default `auto` mode will refuse
+to score until the native extension is installed.
+
 For local development from a checkout:
 
 ```bash
 pip install -e '.[dev]'
+```
+
+If an editable install was created before the Rust extension was built, rebuild
+it with:
+
+```bash
+python -m pip install --force-reinstall --no-deps -e .
 ```
 
 ## Quick Start
@@ -172,7 +183,7 @@ Source exposure:
 
 Pair exposure:
   exact overlap:    25.00%
-  PairLeak@0.85:   25.00%
+  PairLeakTopK@0.85:   25.00%
 
 Generalization gap
 ------------------
@@ -275,10 +286,10 @@ exposure pass has already happened.
 
 | Pattern | Interpretation |
 | --- | --- |
-| High BLEU, high TM-BLEU, high PairLeak, low Far-BLEU | Raw corpus score may overstate broad generalization. Report this as high-exposure or narrow-domain performance. |
+| High BLEU, high TM-BLEU, high PairLeakTopK, low Far-BLEU | Raw corpus score may overstate broad generalization. Report this as high-exposure or narrow-domain performance. |
 | Moderate BLEU, low TM-BLEU, high delta over TM, good Far-BLEU | Stronger evidence that the system is doing more than nearest-neighbor reuse. |
 | Low BLEU, low TM-BLEU, low Far-BLEU | The test set is not easy for the TM baseline, and the system is also weak. |
-| High BLEU, low TM-BLEU, high Far-BLEU, low PairLeak | Stronger evidence of generalization under this test distribution. |
+| High BLEU, low TM-BLEU, high Far-BLEU, low PairLeakTopK | Stronger evidence of generalization under this test distribution. |
 | High exposure and no far-bin data | Valid in-domain result, but weak evidence for broad out-of-domain generalization. |
 
 Use these diagnostics as context, not as automatic pass/fail rules. A
@@ -410,12 +421,14 @@ $$
 For threshold `t`, pair leak is:
 
 $$
-\mathrm{PairLeak}_{t} =
+\mathrm{PairLeakTopK}_{t} =
 \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[E_i^{pair} \ge t]
 $$
 
-For example, `PairLeak@0.85 = 0.20` means 20% of test examples have a
-source/reference pair that is very close to one training pair.
+For example, `PairLeakTopK@0.85 = 0.20` means 20% of test examples have a
+source/reference pair that is very close to one training pair within the
+top-k candidate set. Exact pair overlap is exact; top-k pair leak is labeled
+separately because it is candidate-set limited.
 
 ### Translation-Memory Baseline
 
@@ -484,6 +497,7 @@ Main commands:
 | `tame-mt tm-baseline` | Write nearest-neighbor TM hypotheses. |
 | `tame-mt index build` | Build a reusable `.tameidx` training index. |
 | `tame-mt index inspect` | Inspect a `.tameidx` bundle manifest. |
+| `tame-mt index verify` | Verify bundle hashes, archive shape, and native-index invariants. |
 | `tame-mt score-cached` | Score one hypothesis from cached segment diagnostics. |
 | `tame-mt score-cached-batch` | Score many hypotheses from one cached segment file. |
 
@@ -629,12 +643,19 @@ For deeper API documentation, see [docs/api.md](docs/api.md).
     "num_test": 1000,
     "num_refs": 1
   },
+  "retrieval": {
+    "mode": "exact",
+    "source_exposure_mode": "exact",
+    "target_exposure_mode": "exact",
+    "pair_exposure_mode": "topk_rerank",
+    "tm_retrieval_exact": true
+  },
   "backend": {
-    "name": "native_fast",
+    "name": "native_exact",
     "native": true,
-    "exact": false,
+    "exact": true,
     "requested_mode": "auto",
-    "resolved_mode": "native_fast",
+    "resolved_mode": "native_exact",
     "index_reused": false
   },
   "quality": {
@@ -658,7 +679,7 @@ Every report includes a deterministic signature that records:
 - TAME-MT version;
 - normalization settings;
 - similarity function;
-- retrieval backend and index mode;
+- retrieval mode, approximation flag, backend, and index mode;
 - TM baseline policy;
 - bin and leak thresholds;
 - pair reranking top-k;
@@ -668,7 +689,7 @@ Every report includes a deterministic signature that records:
 Example:
 
 ```text
-tame-mt|v:0.1.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|idx:auto|backend:native_fast|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
+tame-mt|v:0.1.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|retrieval:exact|approx:0|idx:auto|backend:native_exact|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
 ```
 
 For the JSON schema, see [docs/json_schema.md](docs/json_schema.md).
@@ -686,24 +707,43 @@ src/tame_mt/
   normalize.py    deterministic text normalization
   ngrams.py       character n-gram extraction
   similarity.py   Jaccard similarity logic
-  index.py        inverted-index retrieval abstractions
+  index.py        thin wrapper around the Rust native index
   native.py       native backend selection/status
   exact.py        exact overlap and exact-match helpers
   exposure.py     source, target, and pair exposure assembly
+  approx_validation.py per-run fast-mode validation against exact retrieval
   tm.py           source-nearest-neighbor TM baseline
   bins.py         source-distance bins and gap metrics
   scoring.py      BLEU/chrF corpus and bin scoring
   metrics/        SacreBLEU integration
   artifacts.py    cached segment JSONL validation
   persistence.py  .tameidx bundle save/load/inspection
+  performance.py  timing, thread, and memory metadata
   report.py       text, JSON, and JSONL report rendering
   io.py           UTF-8 and gzip input/output helpers
 ```
 
-The Rust/PyO3 native extension lives in the package's Cargo crate and provides
-the high-throughput nearest-neighbor backend. The Python package keeps pure
-Python fallback modes so the metric remains usable even when the native
-extension is unavailable.
+The Rust/PyO3 native extension is the only production retrieval engine. Python
+owns packaging, the public API, CLI argument parsing, file IO, normalization,
+SacreBLEU integration, aggregation, and report rendering. Rust owns
+high-throughput nearest-neighbor search, exact reranking, pair reranking, and
+serialized native indexes. If the Rust extension is unavailable, normal scoring
+fails with an installation error instead of falling back to a slower Python
+engine.
+
+Rust crate layout:
+
+```text
+src/lib.rs              PyO3 module registration
+src/index/mod.rs        native index construction and Python-exposed methods
+src/index/query.rs      nearest-neighbor and pair-reranking logic
+src/index/validation.rs serialized-index invariant checks
+src/index/tests.rs      Rust native-index tests
+src/ngrams.rs           UTF-8-safe character n-gram slicing
+src/similarity.rs       integer Jaccard helpers
+src/validation.rs       shared validation helpers
+src/types.rs            compact native type aliases
+```
 
 Supporting directories:
 
@@ -711,7 +751,8 @@ Supporting directories:
 tests/        Python unit and CLI tests
 benchmarks/   synthetic performance and recall checks
 examples/     toy data and public-corpus demo scripts/results
-docs/         detailed CLI, API, interpretation, release, and backend docs
+docs/         CLI, API, method, privacy, reproducibility, release, and demo docs
+schemas/      JSON Schema contracts for reports and artifacts
 .github/      CI, wheel, release, and Dependabot workflows
 ```
 
@@ -725,11 +766,33 @@ Retrieval modes:
 
 | Mode | Behavior | Use |
 | --- | --- | --- |
+| `auto` | Default. Requires Rust and resolves to exact native retrieval. | Production scoring and audits. |
 | `native_exact` | Rust exact character n-gram Jaccard retrieval over shared-gram candidates. | Small and medium corpora when exact nearest-neighbor exposure is required. |
-| `native_fast` | Rust rare-gram candidate generation plus exact reranking of a bounded shortlist. | Large corpora and interactive audits. |
-| `python_exact` | Pure-Python exact fallback. | Debugging and source installs without native wheels. |
-| `python_fast` | Pure-Python bounded fast fallback. | Large-corpus fallback when native wheels are unavailable. |
-| `auto` | Chooses native exact/fast when available, otherwise Python exact/fast. | Default. |
+| `native_fast` | Rust rare-gram candidate generation plus exact reranking of a bounded shortlist. | Explicit approximate exploratory runs with `--retrieval approx --allow-approximate`. |
+
+There are no Python retrieval backends. The small Python `ngrams.py` and
+`similarity.py` modules define the public metric math for tests and examples;
+they are not indexing engines.
+
+Fast mode can be validated per corpus by sampling exact retrieval:
+
+```bash
+tame-mt audit \
+  --train-src train.src \
+  --train-tgt train.tgt \
+  --test-src test.src \
+  --ref test.ref \
+  --retrieval approx \
+  --allow-approximate \
+  --validate-approx-sample 1000 \
+  --json-out audit.json
+```
+
+The report then includes `approx_validation`, which compares approximate and
+exact retrieval for nearest-neighbor agreement, source-bin decisions,
+source-score error, pair-threshold decisions, and sample TM-BLEU. Validation is
+a guardrail for fast exploratory runs; exact mode remains the canonical mode
+for published numbers.
 
 Recommended production workflow:
 
@@ -742,6 +805,11 @@ Local benchmark notes for public corpora and synthetic corpora are in
 [docs/performance.md](docs/performance.md) and
 [examples/public_corpora_demo/](examples/public_corpora_demo/).
 
+Every JSON report includes a `performance` block with backend, thread count,
+index-reuse status, peak RSS, and available stage timings. Use
+`--profile-json profile.json` on CLI runs to write a separate command profile
+that includes final output-writing time.
+
 ## Privacy And Security
 
 TAME-MT runs locally. It does not download models, call remote services, or send
@@ -751,8 +819,15 @@ Data can still leak through artifacts you choose to write:
 
 - `--include-neighbor-text` can write raw training text;
 - `.tameidx` bundles contain training text needed for reproducible TM outputs;
+- segment JSONL contains TM baseline hypotheses by default and may therefore
+  contain raw training-target text;
 - segment JSONL files may contain raw test/reference/hypothesis text if raw
   text flags are enabled.
+
+Use `--no-tm-text-in-segments` for privacy-safer diagnostics that omit TM
+hypotheses. Those diagnostics are intentionally not accepted by `score-cached`,
+because cached scoring needs the TM hypotheses to recompute TM-BLEU and delta
+over TM.
 
 Treat `.tameidx`, segment JSONL, and metadata files from unknown sources as
 untrusted. The loader rejects malformed or suspicious index bundles before
@@ -826,14 +901,16 @@ Publishing.
 Before a release:
 
 1. Update versions in `pyproject.toml`, `Cargo.toml`, and
-   `src/tame_mt/version.py`.
+   `src/tame_mt/version.py`, plus `CITATION.cff` and versioned README/schema
+   examples.
 2. Update [CHANGELOG.md](CHANGELOG.md).
-3. Run `scripts/acceptance.sh`.
-4. Push a `v*` tag.
-5. Let the tag-triggered release workflow build wheels, validate distributions,
+3. Run `python scripts/check_versions.py`.
+4. Run `scripts/acceptance.sh`.
+5. Push a `v*` tag.
+6. Let the tag-triggered release workflow build wheels, validate distributions,
    and generate the SBOM artifact.
-6. Manually dispatch the release workflow from the tag with `publish=true`.
-7. Approve the protected `pypi` environment deployment.
+7. Manually dispatch the release workflow from the tag with `publish=true`.
+8. Approve the protected `pypi` environment deployment.
 
 See [docs/release.md](docs/release.md).
 

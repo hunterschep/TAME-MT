@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tame_mt.approx_validation import ApproxValidation
 from tame_mt.cli import main
 from tame_mt.io import read_lines, write_lines
 from tame_mt.report import segment_metadata_path
@@ -13,6 +14,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
     json_out = tmp_path / "nested" / "report.json"
     segment_out = tmp_path / "nested" / "segments.jsonl"
+    profile_out = tmp_path / "nested" / "profile.json"
     rc = main(
         [
             "score",
@@ -30,6 +32,8 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
             str(json_out),
             "--segment-out",
             str(segment_out),
+            "--profile-json",
+            str(profile_out),
             "--metrics",
             "bleu,chrf",
             "--quiet",
@@ -47,6 +51,15 @@ def test_cli_score_json_and_segment_outputs(tmp_path: Path, capsys) -> None:
     assert metadata["artifact"] == "segment_jsonl"
     assert metadata["signature"] == payload["signature"]
     assert metadata["data"]["num_test"] == 4
+    assert payload["retrieval"]["mode"] == "exact"
+    assert payload["performance"]["backend"] == "native_exact"
+    assert payload["performance"]["index_reused"] is False
+    assert "evaluate_corpus" in payload["performance"]["timings_sec"]
+    profile = json.loads(profile_out.read_text(encoding="utf-8"))
+    assert profile["command"] == "score"
+    assert profile["performance"]["backend"] == "native_exact"
+    assert "write_outputs" in profile["performance"]["timings_sec"]
+    assert profile["reports"][0]["signature"] == payload["signature"]
 
 
 def test_cli_score_verbose_reports_stage_timings(tmp_path: Path, capsys) -> None:
@@ -160,6 +173,281 @@ def test_cli_doctor_reports_environment(capsys) -> None:
     assert rc == 0
     assert "TAME-MT:" in captured.out
     assert "Native backend:" in captured.out
+
+
+def test_cli_rejects_approx_backend_without_approx_mode(tmp_path: Path, capsys) -> None:
+    json_out = tmp_path / "report.json"
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--index-mode",
+            "native_fast",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "cannot use approximate backend" in captured.err
+
+
+def test_cli_approx_mode_labels_report(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    json_out = tmp_path / "report.json"
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--retrieval",
+            "approx",
+            "--allow-approximate",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert payload["backend"]["name"] == "native_fast"
+    assert payload["retrieval"]["mode"] == "approx"
+    assert payload["retrieval"]["pair_exposure_mode"] == "approx_topk"
+    assert any("Approximate retrieval is enabled" in warning for warning in payload["warnings"])
+
+
+def test_cli_approx_validation_writes_report_payload(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    json_out = tmp_path / "report.json"
+    profile_out = tmp_path / "profile.json"
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--retrieval",
+            "approx",
+            "--allow-approximate",
+            "--validate-approx-sample",
+            "4",
+            "--json-out",
+            str(json_out),
+            "--profile-json",
+            str(profile_out),
+            "--quiet",
+        ]
+    )
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    profile = json.loads(profile_out.read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert payload["approx_validation"]["passed"] is True
+    assert payload["approx_validation"]["sample_size"] == 4
+    assert payload["approx_validation"]["source_top1_agreement"] == 1.0
+    assert payload["approx_validation"]["tm_bleu_abs_delta_on_sample"] == 0.0
+    assert "validate_approximate_retrieval" in profile["performance"]["timings_sec"]
+
+
+def test_cli_approx_validation_requires_approx_mode(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    json_out = tmp_path / "report.json"
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--validate-approx-sample",
+            "1",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "--validate-approx-sample requires --retrieval approx" in captured.err
+    assert not json_out.exists()
+
+
+def test_cli_approx_validation_supports_source_only_audit(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    json_out = tmp_path / "audit.json"
+    rc = main(
+        [
+            "audit",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--retrieval",
+            "approx",
+            "--allow-approximate",
+            "--validate-approx-sample",
+            "2",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert payload["approx_validation"]["passed"] is True
+    assert payload["approx_validation"]["target_top1_agreement"] is None
+    assert payload["approx_validation"]["tm_bleu_abs_delta_on_sample"] is None
+
+
+def test_cli_approx_validation_failure_is_fatal(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("tame_mt._native")
+    json_out = tmp_path / "report.json"
+
+    def fail_validation(**_: object) -> ApproxValidation:
+        return ApproxValidation(
+            payload={"passed": False, "failures": ["source_top1_agreement 0.0 < 0.95"]},
+            failures=["source_top1_agreement 0.0 < 0.95"],
+        )
+
+    monkeypatch.setattr("tame_mt.cli.validate_approximate_run", fail_validation)
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--retrieval",
+            "approx",
+            "--allow-approximate",
+            "--validate-approx-sample",
+            "1",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "approximate validation failed" in captured.err
+    assert not json_out.exists()
+
+
+def test_cli_approx_validation_failure_can_be_written_as_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("tame_mt._native")
+    json_out = tmp_path / "report.json"
+
+    def fail_validation(**_: object) -> ApproxValidation:
+        return ApproxValidation(
+            payload={"passed": False, "failures": ["source_top1_agreement 0.0 < 0.95"]},
+            failures=["source_top1_agreement 0.0 < 0.95"],
+        )
+
+    monkeypatch.setattr("tame_mt.cli.validate_approximate_run", fail_validation)
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--retrieval",
+            "approx",
+            "--allow-approximate",
+            "--validate-approx-sample",
+            "1",
+            "--allow-approx-validation-failure",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+
+    assert rc == 0
+    assert payload["approx_validation"]["passed"] is False
+    assert any("approximate validation failed" in warning for warning in payload["warnings"])
+
+
+def test_cli_cached_scoring_rejects_approx_validation(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(tmp_path / "missing.jsonl"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--validate-approx-sample",
+            "1",
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 2
+    assert "cannot be used with cached scoring" in captured.err
 
 
 def test_cli_tm_baseline_writes_aligned_output(tmp_path: Path) -> None:
@@ -378,7 +666,154 @@ def test_cli_score_cached_rejects_segment_metadata_config_mismatch(
     assert not json_out.exists()
 
 
-def test_cli_score_cached_accepts_legacy_segments_without_metadata(tmp_path: Path) -> None:
+def test_cli_score_cached_rejects_reference_hash_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    segments = tmp_path / "segments.jsonl"
+    json_out = tmp_path / "cached.json"
+    stale_ref = tmp_path / "stale.ref"
+    stale_ref.write_text("uno\nDOS CAMBIADO\ntres\ncuatro\n", encoding="utf-8")
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(stale_ref),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert cached_rc == 2
+    assert "reference hash mismatch" in captured.err
+    assert not json_out.exists()
+
+
+def test_cli_score_cached_allows_reference_hash_mismatch_with_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    segments = tmp_path / "segments.jsonl"
+    json_out = tmp_path / "cached.json"
+    stale_ref = tmp_path / "stale.ref"
+    stale_ref.write_text("uno\nDOS CAMBIADO\ntres\ncuatro\n", encoding="utf-8")
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(stale_ref),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--allow-reference-hash-mismatch",
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert cached_rc == 0
+    assert "may reuse stale target/pair exposure" in captured.err
+    assert json_out.exists()
+
+
+def test_cli_no_tm_text_segment_artifact_is_not_cacheable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    segments = tmp_path / "segments.jsonl"
+    json_out = tmp_path / "cached.json"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--no-tm-text-in-segments",
+            "--quiet",
+        ]
+    )
+    row = json.loads(segments.read_text(encoding="utf-8").splitlines()[0])
+    metadata = json.loads(segment_metadata_path(segments).read_text(encoding="utf-8"))
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--json-out",
+            str(json_out),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert "tm_hyp" not in row
+    assert metadata["privacy"]["tm_text_included"] is False
+    assert cached_rc == 2
+    assert "does not contain TM hypotheses" in captured.err
+    assert not json_out.exists()
+
+
+def test_cli_score_cached_rejects_legacy_segments_without_metadata(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     segments = tmp_path / "segments.jsonl"
     cached_json = tmp_path / "cached.json"
     full_rc = main(
@@ -411,6 +846,53 @@ def test_cli_score_cached_accepts_legacy_segments_without_metadata(tmp_path: Pat
             str(FIXTURES / "hyp.out"),
             "--num-train",
             "4",
+            "--json-out",
+            str(cached_json),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert full_rc == 0
+    assert cached_rc == 2
+    assert "segment metadata sidecar is required" in captured.err
+    assert not cached_json.exists()
+
+
+def test_cli_score_cached_accepts_unsafe_legacy_segments_with_override(tmp_path: Path) -> None:
+    segments = tmp_path / "segments.jsonl"
+    cached_json = tmp_path / "cached.json"
+    full_rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--segment-out",
+            str(segments),
+            "--quiet",
+        ]
+    )
+    segment_metadata_path(segments).unlink()
+    cached_rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--allow-unsafe-no-metadata",
             "--json-out",
             str(cached_json),
             "--quiet",
@@ -742,6 +1224,46 @@ def test_cli_index_build_inspect_and_score_reuse(tmp_path: Path, capsys) -> None
     assert indexed["quality"] == full["quality"]
     assert indexed["exposure"] == full["exposure"]
     assert indexed["backend"]["index_reused"] is True
+
+
+def test_cli_index_verify_checks_bundle(tmp_path: Path, capsys) -> None:
+    pytest.importorskip("tame_mt._native")
+    index_path = tmp_path / "train.tameidx"
+    build_rc = main(
+        [
+            "index",
+            "build",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--out",
+            str(index_path),
+            "--quiet",
+        ]
+    )
+    verify_rc = main(
+        [
+            "index",
+            "verify",
+            str(index_path),
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert build_rc == 0
+    assert verify_rc == 0
+    assert payload["format"] == "tameidx"
+    assert payload["num_train"] == 4
+    assert payload["train_src_matches"] is True
+    assert payload["train_tgt_matches"] is True
+    assert "source.index.bin" in payload["checked_native_indexes"]
 
 
 def test_cli_reports_alignment_errors(tmp_path: Path, capsys) -> None:

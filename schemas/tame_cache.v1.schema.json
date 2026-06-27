@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hunterschep/TAME-MT/schemas/tame_cache.v1.schema.json",
+  "title": "TAME-MT cache metadata sidecar",
+  "description": "Current cacheable artifacts are segment JSONL plus this metadata sidecar.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact",
+    "tame_version",
+    "signature",
+    "data",
+    "retrieval",
+    "config",
+    "backend",
+    "privacy",
+    "fingerprints"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "artifact": {
+      "const": "segment_jsonl"
+    },
+    "tame_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["num_train", "num_test", "num_refs"],
+      "properties": {
+        "num_train": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "num_test": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "num_refs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "retrieval": {
+      "type": "object"
+    },
+    "config": {
+      "type": "object"
+    },
+    "backend": {
+      "type": "object"
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tm_text_included",
+        "contains_training_target_text",
+        "contains_neighbor_training_text"
+      ],
+      "properties": {
+        "tm_text_included": {
+          "type": "boolean"
+        },
+        "contains_training_target_text": {
+          "type": "boolean"
+        },
+        "contains_neighbor_training_text": {
+          "type": "boolean"
+        }
+      }
+    },
+    "fingerprints": {
+      "type": "object",
+      "properties": {
+        "config_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "train_src_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "train_src_normalized_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "train_tgt_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "train_tgt_normalized_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "test_src_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "test_src_normalized_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "refs_sha256": {
+          "$ref": "#/$defs/hashArray"
+        },
+        "refs_normalized_sha256": {
+          "$ref": "#/$defs/hashArray"
+        },
+        "tm_hyp_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "hashArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sha256"
+      }
+    }
+  }
+}

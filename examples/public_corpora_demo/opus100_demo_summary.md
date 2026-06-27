@@ -7,20 +7,22 @@ supervised train/test splits.
 - Test cap per pair: 2,000 aligned pairs
 - Direction: first language in the OPUS-100 pair name to second language
 - Mode: TAME-MT audit, so no system hypothesis was evaluated
-- Retrieval: default `auto` index mode; the table records the resolved backend
+- Retrieval: archived approximate `native_fast` run from the v0.1 prototype.
+  Treat these numbers as a demo smoke result, not canonical exact exposure.
 
-| Pair | Direction | Train | Test | Backend | Audit s | TM-BLEU | TM-chrF | Mean SX | SourceNearDup@0.85 | PairLeak@0.85 | ExactPair | Far % |
+| Pair | Direction | Train | Test | Backend | Audit s | TM-BLEU | TM-chrF | Mean SX | SourceNearDup@0.85 | PairLeakTopK@0.85 | ExactPair | Far % |
 | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | de-en | de->en | 50,000 | 2,000 | native_fast | 5.66 | 7.44 | 19.23 | 0.185 | 0.60% | 0.15% | 0.00% | 83.40% |
 | en-hi | en->hi | 50,000 | 2,000 | native_fast | 5.42 | 5.32 | 19.75 | 0.254 | 1.10% | 0.10% | 0.00% | 69.60% |
 | en-tr | en->tr | 50,000 | 2,000 | native_fast | 2.69 | 1.51 | 14.21 | 0.213 | 0.75% | 0.20% | 0.00% | 79.80% |
 | ar-en | ar->en | 50,000 | 2,000 | native_fast | 4.56 | 4.45 | 18.96 | 0.168 | 0.45% | 0.15% | 0.00% | 87.55% |
 
-Interpretation: lower TM-BLEU and lower PairLeak suggest that this capped
+Interpretation: lower TM-BLEU and lower PairLeakTopK suggest that this capped
 training subset does not make the test split easy to solve by source-side
 nearest-neighbor reuse. High far-bin coverage means the split contains many
 examples that are distant from the capped training subset under default
 character n-gram Jaccard exposure.
 
-These are demonstration numbers for capped subsets, not definitive claims
-about full OPUS-100 language-pair releases.
+These are demonstration numbers for capped subsets, not definitive claims about
+full OPUS-100 language-pair releases. Regenerate with the current CLI before
+using demo numbers in release notes or papers.

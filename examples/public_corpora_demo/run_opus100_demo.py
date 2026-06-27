@@ -18,7 +18,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from tame_mt import TameScorer
+from tame_mt import IndexConfig, RetrievalConfig, ScoreConfig, TameScorer
 from tame_mt.io import write_lines
 from tame_mt.report import write_json_report
 
@@ -45,6 +45,9 @@ def main() -> int:
     parser.add_argument("--pair", action="append", dest="pairs", help="OPUS-100 pair, e.g. de-en")
     parser.add_argument("--train-limit", type=int, default=50_000)
     parser.add_argument("--test-limit", type=int, default=2_000)
+    parser.add_argument("--retrieval", choices=["exact", "guarded", "approx"], default="exact")
+    parser.add_argument("--allow-approximate", action="store_true")
+    parser.add_argument("--index-mode", default="auto")
     parser.add_argument("--output-dir", default="demo_runs/opus100_public_corpora")
     parser.add_argument(
         "--summary-dir",
@@ -63,7 +66,18 @@ def main() -> int:
         directory.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, object]] = []
-    scorer = TameScorer()
+    index_mode = args.index_mode
+    if args.retrieval == "approx" and index_mode == "auto":
+        index_mode = "native_fast"
+    scorer = TameScorer(
+        ScoreConfig(
+            index=IndexConfig(mode=index_mode),
+            retrieval=RetrievalConfig(
+                mode=args.retrieval,
+                allow_approximate=args.allow_approximate,
+            ),
+        )
+    )
     for pair in pairs:
         print(f"Preparing {pair}...")
         archive = download_pair(pair, downloads_dir)
@@ -195,7 +209,7 @@ def summary_row(
         "mean_source_exposure": source["mean"],
         "source_near_dup_at_085": source_thresholds["0.85"],
         "exact_source_overlap": source["exact_overlap"],
-        "pair_leak_at_085": pair_thresholds["0.85"],
+        "pair_leak_topk_at_085": pair_thresholds["0.85"],
         "exact_pair_overlap": pair["exact_overlap"],
         "near_count": near["count"],
         "far_count": far["count"],
@@ -226,10 +240,10 @@ def write_summary_markdown(
         f"- Test cap per pair: {test_limit:,} aligned pairs",
         "- Direction: first language in the OPUS-100 pair name to second language",
         "- Mode: TAME-MT audit, so no system hypothesis was evaluated",
-        "- Retrieval: default `auto` index mode; the table records the resolved backend",
+        "- Retrieval: exact by default; approximate runs require explicit opt-in",
         "",
         "| Pair | Direction | Train | Test | Backend | Audit s | TM-BLEU | TM-chrF | "
-        "Mean SX | SourceNearDup@0.85 | PairLeak@0.85 | ExactPair | Far % |",
+        "Mean SX | SourceNearDup@0.85 | PairLeakTopK@0.85 | ExactPair | Far % |",
         "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
@@ -237,19 +251,20 @@ def write_summary_markdown(
             "| {pair} | {direction} | {train_used:,} | {test_used:,} | {backend} | "
             "{audit_seconds:.2f} | {tm_bleu:.2f} | {tm_chrf:.2f} | "
             "{mean_source_exposure:.3f} | {source_near_dup_at_085:.2%} | "
-            "{pair_leak_at_085:.2%} | {exact_pair_overlap:.2%} | {far_pct:.2%} |".format(**row)
+            "{pair_leak_topk_at_085:.2%} | {exact_pair_overlap:.2%} | {far_pct:.2%} |".format(**row)
         )
     lines.extend(
         [
             "",
-            "Interpretation: lower TM-BLEU and lower PairLeak suggest that this capped",
+            "Interpretation: lower TM-BLEU and lower PairLeakTopK suggest that this capped",
             "training subset does not make the test split easy to solve by source-side",
             "nearest-neighbor reuse. High far-bin coverage means the split contains many",
             "examples that are distant from the capped training subset under default",
             "character n-gram Jaccard exposure.",
             "",
             "These are demonstration numbers for capped subsets, not definitive claims",
-            "about full OPUS-100 language-pair releases.",
+            "about full OPUS-100 language-pair releases. If retrieval is approximate,",
+            "treat exposure and TM metrics as candidate-set estimates.",
         ]
     )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

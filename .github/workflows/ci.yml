@@ -41,6 +41,8 @@ jobs:
         run: ruff check .
       - name: Type check
         run: mypy src/tame_mt
+      - name: Version consistency
+        run: python scripts/check_versions.py
 
   rust:
     name: Rust checks
@@ -119,6 +121,23 @@ jobs:
             --max-cached-seconds 5 \
             --max-prepared-cached-seconds 2 \
             --max-cached-batch-per-system-seconds 2 \
+            --max-index-bytes 80000000 \
+            --assert-thresholds
+      - name: Larger approximate throughput benchmark
+        run: |
+          python benchmarks/bench_synthetic.py \
+            --train-size 50000 \
+            --test-size 1000 \
+            --retrieval approx \
+            --allow-approximate \
+            --index-mode native_fast \
+            --staged \
+            --max-seconds 10 \
+            --max-index-build-seconds 12 \
+            --max-indexed-seconds 4 \
+            --max-cached-seconds 3 \
+            --max-prepared-cached-seconds 1 \
+            --max-cached-batch-per-system-seconds 1 \
             --max-index-bytes 80000000 \
             --assert-thresholds
       - name: Broader fast retrieval recall validation

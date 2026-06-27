@@ -39,6 +39,26 @@ class ExposureSummary:
 
 
 @dataclass(slots=True)
+class RetrievalSemantics:
+    mode: str
+    source_exposure_mode: str
+    target_exposure_mode: str
+    pair_exposure_mode: str
+    tm_retrieval_exact: bool
+    false_negative_safe_thresholds: list[float]
+    approximate: bool = False
+
+
+@dataclass(slots=True)
+class PerformanceMetadata:
+    backend: str
+    threads: int | None
+    index_reused: bool
+    timings_sec: dict[str, float | None]
+    memory: dict[str, float | None]
+
+
+@dataclass(slots=True)
 class BinReport:
     name: str
     count: int
@@ -57,6 +77,7 @@ class TameReport:
     num_test: int
     num_refs: int
     config: dict[str, Any]
+    retrieval: RetrievalSemantics
     backend: dict[str, Any]
     system_scores: dict[str, float | None]
     tm_scores: dict[str, float | None]
@@ -65,6 +86,8 @@ class TameReport:
     bins: list[BinReport]
     generalization_gap: dict[str, float | None]
     warnings: list[str]
+    performance: PerformanceMetadata
+    approx_validation: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +100,7 @@ class TameReport:
                 "num_refs": self.num_refs,
             },
             "config": self.config,
+            "retrieval": asdict(self.retrieval),
             "backend": self.backend,
             "quality": {
                 "system": self.system_scores,
@@ -97,6 +121,8 @@ class TameReport:
                 for item in self.bins
             ],
             "generalization_gap": self.generalization_gap,
+            "approx_validation": self.approx_validation,
+            "performance": asdict(self.performance),
             "warnings": self.warnings,
         }
 

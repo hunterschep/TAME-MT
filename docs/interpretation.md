@@ -15,18 +15,18 @@ measure semantic adequacy or guarantee real-world utility.
 
 ## Common Patterns
 
-High BLEU, high TM-BLEU, high PairLeak, and low Far-BLEU indicate that raw
+High BLEU, high TM-BLEU, high PairLeakTopK, and low Far-BLEU indicate that raw
 corpus metrics may partly reflect train-test near-duplication. Describe the
 result as in-domain or high-exposure unless additional far-bin evidence supports
 a broader claim.
 
-Moderate BLEU, low TM-BLEU, high delta over TM, good Far-BLEU, and low PairLeak
+Moderate BLEU, low TM-BLEU, high delta over TM, good Far-BLEU, and low PairLeakTopK
 suggest the system may generalize better than raw BLEU alone implies.
 
 Low BLEU, low TM-BLEU, and low Far-BLEU indicate that the test set is not easily
 solved by nearest-neighbor reuse and the system also performs poorly.
 
-High BLEU, low TM-BLEU, high Far-BLEU, and low PairLeak are stronger evidence
+High BLEU, low TM-BLEU, high Far-BLEU, and low PairLeakTopK are stronger evidence
 of generalization under the tested distribution.
 
 High exposure, high in-domain quality, and no far-bin coverage support a valid

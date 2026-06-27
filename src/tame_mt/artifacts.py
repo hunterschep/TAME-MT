@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from math import isfinite
 from pathlib import Path
 from typing import Any, TypeVar
@@ -7,7 +8,8 @@ from typing import Any, TypeVar
 from tame_mt.config import ScoreConfig
 from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.io import open_text
-from tame_mt.json_utils import strict_json_loads
+from tame_mt.json_utils import strict_json_dumps, strict_json_loads
+from tame_mt.normalize import normalize_text
 from tame_mt.report import SEGMENT_METADATA_SUFFIX, config_to_dict
 from tame_mt.schema import SegmentExposure, SegmentTMResult
 
@@ -67,6 +69,10 @@ def validate_segment_metadata(
     num_train: int,
     num_test: int,
     num_refs: int,
+    refs: list[list[str]] | None = None,
+    tm_results: list[SegmentTMResult] | None = None,
+    allow_reference_hash_mismatch: bool = False,
+    require_tm_text: bool = False,
 ) -> None:
     if metadata.get("schema_version") != SEGMENT_METADATA_SCHEMA_VERSION:
         raise InputDataError(
@@ -78,6 +84,15 @@ def validate_segment_metadata(
     if not isinstance(signature, str) or not signature:
         raise InputDataError("segment metadata signature must be a non-empty string")
     _metadata_object(metadata, "backend")
+    privacy = metadata.get("privacy")
+    if require_tm_text:
+        if not isinstance(privacy, dict):
+            raise InputDataError("segment metadata privacy field is required for cached scoring")
+        if privacy.get("tm_text_included") is not True:
+            raise InputDataError(
+                "segment artifact does not contain TM hypotheses; cached scoring would produce "
+                "incorrect TM-BLEU. Re-run without --no-tm-text-in-segments."
+            )
     data = _metadata_object(metadata, "data")
     _require_metadata_int(data, "num_train", num_train)
     _require_metadata_int(data, "num_test", num_test)
@@ -85,7 +100,7 @@ def validate_segment_metadata(
 
     saved_config = _metadata_object(metadata, "config")
     current_config = config_to_dict(config)
-    for key in ("normalization", "similarity", "index", "pair", "tm"):
+    for key in ("normalization", "similarity", "retrieval", "index", "pair", "tm"):
         if saved_config.get(key) != current_config[key]:
             raise ConfigurationError(
                 f"segment metadata {key} config does not match current scorer config"
@@ -98,6 +113,101 @@ def validate_segment_metadata(
             raise ConfigurationError(
                 f"segment metadata bins.{key} does not match current scorer config"
             )
+
+    if refs is not None or tm_results is not None:
+        saved_fingerprints = _metadata_object(metadata, "fingerprints")
+        current_fingerprints = build_segment_fingerprints(
+            config,
+            refs=refs,
+            tm_results=tm_results,
+        )
+        _validate_reference_fingerprints(
+            saved_fingerprints,
+            current_fingerprints,
+            allow_mismatch=allow_reference_hash_mismatch,
+        )
+        _validate_fingerprint(saved_fingerprints, current_fingerprints, "tm_hyp_sha256")
+
+
+def build_segment_fingerprints(
+    config: ScoreConfig,
+    *,
+    train_src: list[str] | None = None,
+    train_tgt: list[str] | None = None,
+    test_src: list[str] | None = None,
+    refs: list[list[str]] | None = None,
+    tm_results: list[SegmentTMResult] | None = None,
+) -> dict[str, Any]:
+    fingerprints: dict[str, Any] = {
+        "config_sha256": _json_sha256(config_to_dict(config)),
+    }
+    if train_src is not None:
+        fingerprints["train_src_sha256"] = hash_line_sequence(train_src)
+        fingerprints["train_src_normalized_sha256"] = hash_line_sequence(
+            _normalized_lines(train_src, config)
+        )
+    if train_tgt is not None:
+        fingerprints["train_tgt_sha256"] = hash_line_sequence(train_tgt)
+        fingerprints["train_tgt_normalized_sha256"] = hash_line_sequence(
+            _normalized_lines(train_tgt, config)
+        )
+    if test_src is not None:
+        fingerprints["test_src_sha256"] = hash_line_sequence(test_src)
+        fingerprints["test_src_normalized_sha256"] = hash_line_sequence(
+            _normalized_lines(test_src, config)
+        )
+    if refs is not None:
+        fingerprints["refs_sha256"] = [hash_line_sequence(ref) for ref in refs]
+        fingerprints["refs_normalized_sha256"] = [
+            hash_line_sequence(_normalized_lines(ref, config)) for ref in refs
+        ]
+    if tm_results is not None:
+        fingerprints["tm_hyp_sha256"] = hash_line_sequence([result.tm_hyp for result in tm_results])
+    return fingerprints
+
+
+def hash_line_sequence(lines: list[str]) -> str:
+    digest = sha256()
+    for line in lines:
+        encoded = line.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _normalized_lines(lines: list[str], config: ScoreConfig) -> list[str]:
+    return [normalize_text(line, config.normalization) for line in lines]
+
+
+def _json_sha256(value: dict[str, Any]) -> str:
+    encoded = strict_json_dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return sha256(encoded).hexdigest()
+
+
+def _validate_reference_fingerprints(
+    saved: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    allow_mismatch: bool,
+) -> None:
+    for key in ("refs_sha256", "refs_normalized_sha256"):
+        try:
+            _validate_fingerprint(saved, current, key)
+        except ConfigurationError as exc:
+            if allow_mismatch:
+                return
+            raise ConfigurationError(
+                f"segment metadata reference hash mismatch for {key}; cached target/pair "
+                "exposure may be stale"
+            ) from exc
+
+
+def _validate_fingerprint(saved: dict[str, Any], current: dict[str, Any], key: str) -> None:
+    if key not in current:
+        return
+    saved_value = saved.get(key)
+    if saved_value != current[key]:
+        raise ConfigurationError(f"segment metadata fingerprint {key} does not match current input")
 
 
 def _metadata_object(payload: dict[str, Any], key: str) -> dict[str, Any]:

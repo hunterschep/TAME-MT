@@ -19,9 +19,17 @@ from tame_mt.exceptions import ConfigurationError, InputDataError
 from tame_mt.exposure import compute_exposure_result, summarize_exposures
 from tame_mt.index import NgramInvertedIndex
 from tame_mt.io import read_lines, validate_corpus_inputs, validate_equal_lengths
+from tame_mt.performance import build_performance_metadata
 from tame_mt.persistence import IndexBundle
 from tame_mt.report import build_signature, config_to_dict
-from tame_mt.schema import BinReport, ExposureSummary, SegmentExposure, SegmentTMResult, TameReport
+from tame_mt.schema import (
+    BinReport,
+    ExposureSummary,
+    RetrievalSemantics,
+    SegmentExposure,
+    SegmentTMResult,
+    TameReport,
+)
 from tame_mt.scoring import PreparedGroupScorer, delta_scores
 from tame_mt.tm import build_tm_hypotheses
 from tame_mt.version import __version__
@@ -373,6 +381,12 @@ class TameScorer:
             num_test=len(test_src),
             num_refs=len(refs) if refs else 0,
             config=config_to_dict(self.config),
+            retrieval=_retrieval_semantics(
+                self.config,
+                resolved_backend=exposure_result.backend.resolved_mode,
+                has_target=train_tgt is not None and refs is not None,
+                has_pair=train_tgt is not None and refs is not None,
+            ),
             backend={
                 "name": exposure_result.backend.name,
                 "native": exposure_result.backend.native,
@@ -388,6 +402,10 @@ class TameScorer:
             bins=bin_reports,
             generalization_gap=gen_gap,
             warnings=warnings,
+            performance=build_performance_metadata(
+                backend=exposure_result.backend.name,
+                index_reused=index_reused,
+            ),
         )
         return EvaluationResult(
             report=report,
@@ -482,6 +500,16 @@ def _build_cached_report(
         num_test=num_test,
         num_refs=num_refs,
         config=config_to_dict(config),
+        retrieval=_retrieval_semantics(
+            config,
+            resolved_backend=(
+                str(artifact_backend.get("resolved_mode") or artifact_backend.get("name"))
+                if artifact_backend is not None
+                else "cached_segments"
+            ),
+            has_target=exposure_summary.target is not None,
+            has_pair=exposure_summary.pair is not None,
+        ),
         backend=backend,
         system_scores=system_scores,
         tm_scores=tm_scores,
@@ -490,4 +518,43 @@ def _build_cached_report(
         bins=bin_reports,
         generalization_gap=generalization_gap,
         warnings=warnings,
+        performance=build_performance_metadata(
+            backend="cached_segments",
+            index_reused=True,
+        ),
+    )
+
+
+def _retrieval_semantics(
+    config: ScoreConfig,
+    *,
+    resolved_backend: str,
+    has_target: bool,
+    has_pair: bool,
+) -> RetrievalSemantics:
+    approximate = config.retrieval.mode == "approx" or resolved_backend.endswith("_fast")
+    source_mode = "approx" if approximate else "exact"
+    target_mode = "none" if not has_target else source_mode
+    pair_mode = "none"
+    if has_pair:
+        pair_mode = "approx_topk" if approximate else "topk_rerank"
+    thresholds = (
+        []
+        if approximate
+        else sorted(
+            {
+                config.bins.far_threshold,
+                config.bins.near_threshold,
+                *config.bins.leak_thresholds,
+            }
+        )
+    )
+    return RetrievalSemantics(
+        mode=config.retrieval.mode,
+        source_exposure_mode=source_mode,
+        target_exposure_mode=target_mode,
+        pair_exposure_mode=pair_mode,
+        tm_retrieval_exact=not approximate,
+        false_negative_safe_thresholds=[float(threshold) for threshold in thresholds],
+        approximate=approximate,
     )

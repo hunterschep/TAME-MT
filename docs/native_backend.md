@@ -13,11 +13,22 @@ If the native backend is installed, `doctor` reports:
 
 ```text
 Native backend: available
-Default backend: auto -> native_exact/native_fast
+Default retrieval: exact -> native_exact
 ```
 
-If it is unavailable, `auto` falls back to the pure-Python exact/fast backends.
-That fallback preserves usability, but large audits will be slower.
+If it is unavailable, `doctor` reports:
+
+```text
+Native backend: unavailable
+Default retrieval: exact -> error (native backend required)
+```
+
+That is a broken or incomplete install for production use. Reinstall from a
+wheel or rebuild the editable checkout with:
+
+```bash
+python -m pip install --force-reinstall --no-deps -e .
+```
 
 If `doctor` reports a native backend version mismatch, rebuild or reinstall the
 package. TAME-MT refuses to use a compiled extension whose version differs from
@@ -51,9 +62,10 @@ store normalized strings, so exact source/target overlap is literal after
 normalization. Ties are resolved by lower training index.
 
 `native_exact` preserves exact nearest-neighbor retrieval over candidates that
-share query n-grams. `native_fast` is approximate because it bounds rare-gram
-candidate generation before exact Jaccard reranking. The report signature records
-the resolved backend.
+share query n-grams. It is the paper-facing default. `native_fast` is approximate
+because it bounds rare-gram candidate generation before exact Jaccard reranking.
+It requires explicit approximate retrieval configuration. The report signature
+records retrieval mode, approximation flag, and resolved backend.
 
 Corpus-level batch queries and batched pair reranking release the Python GIL and
 use Rayon for parallel execution inside Rust. Python still owns file IO,
@@ -70,8 +82,8 @@ native. Python builds deterministic candidate ID lists from source and target
 top-k results, then Rust scores each source/reference query against the shared
 candidate set and returns the best paired neighbor. The corpus path batches
 those pair reranks through one native call, which reduces Python/Rust boundary
-overhead at large test sizes. Pure-Python indexes use the same scoring
-semantics through a fallback path.
+overhead at large test sizes. There is no Python retrieval backend in the
+production package.
 
 ## Persistent Indexes
 
@@ -110,6 +122,12 @@ zip-bomb-style `.tameidx` files from silently loading under the wrong settings
 or forcing unbounded reads. After native-byte decoding, the native loader checks
 n-gram IDs, posting/document cross-references, exact-map indices, sortedness,
 uniqueness, modes, and retrieval limits before the index can answer queries.
+
+Bundle manifests include SHA-256 hashes for raw training text, normalized
+training text, native index payloads, and exact-pair keys when present. Use
+`tame-mt index verify train.tameidx` to check those hashes and native invariants
+without running a score/audit command. Add `--train-src` and `--train-tgt` to
+verify that a bundle still matches local training files.
 
 Bundles are low-compression zip containers by default. Level-1 deflate keeps
 load time low while avoiding very large cache artifacts on public-corpus-scale
