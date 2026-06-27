@@ -108,7 +108,7 @@ For a fixed train/test/reference setup, compute exposure once with
 artifacts for later system outputs.
 
 ```python
-from tame_mt.artifacts import read_segment_jsonl
+from tame_mt import read_segment_jsonl
 from tame_mt.io import read_lines
 
 exposures, tm_results = read_segment_jsonl("segments.jsonl")
@@ -125,19 +125,41 @@ report = scorer.score_from_artifacts(
 This path does not inspect the training corpus or rebuild nearest-neighbor
 indexes.
 
+For many systems on the same cached diagnostics, score them together:
+
+```python
+reports = scorer.score_many_from_artifacts(
+    exposures=exposures,
+    tm_results=tm_results,
+    refs=[read_lines("test.ref")],
+    systems={
+        "system_a": read_lines("system_a.out"),
+        "system_b": read_lines("system_b.out"),
+    },
+    num_train=125000,
+)
+
+system_a_report = reports["system_a"]
+```
+
+Batch artifact scoring validates segment diagnostics once, reuses the same
+reference cache for every system, and computes TM baseline scores once for the
+batch.
+
 Artifact indices are validated and canonicalized before scoring. They must be
 unique and contiguous from `0` to `N-1`; valid rows may be supplied out of order.
 
 ## Custom Configuration
 
 ```python
-from tame_mt import BinConfig, IndexConfig, ScoreConfig, SimilarityConfig
+from tame_mt import BinConfig, IndexConfig, MetricConfig, ScoreConfig, SimilarityConfig
 
 config = ScoreConfig(
     metrics=("bleu", "chrf"),
     similarity=SimilarityConfig(ngram_orders=(2, 3, 4, 5)),
     index=IndexConfig(topk=100),
     bins=BinConfig(far_threshold=0.25, near_threshold=0.75),
+    metric=MetricConfig(bleu_tokenize="13a", chrf_word_order=2),
 )
 ```
 

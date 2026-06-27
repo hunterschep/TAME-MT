@@ -2,11 +2,20 @@ from pathlib import Path
 
 import pytest
 
-from tame_mt import TameScorer
+import tame_mt
+from tame_mt import MetricConfig, SegmentExposure, SegmentTMResult, TameScorer, read_segment_jsonl
 from tame_mt.exceptions import InputDataError
-from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_public_api_exports_cached_scoring_types() -> None:
+    assert MetricConfig.__name__ == "MetricConfig"
+    assert SegmentExposure.__name__ == "SegmentExposure"
+    assert SegmentTMResult.__name__ == "SegmentTMResult"
+    assert read_segment_jsonl.__name__ == "read_segment_jsonl"
+    for name in ("MetricConfig", "SegmentExposure", "SegmentTMResult", "read_segment_jsonl"):
+        assert name in tame_mt.__all__
 
 
 def test_score_files_produces_report() -> None:

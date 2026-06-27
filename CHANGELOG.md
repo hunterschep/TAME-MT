@@ -58,6 +58,8 @@
 - Added `score-cached-batch` and a batch artifact-scoring API so many systems
   can share one segment-artifact read, one reference cache, and one TM baseline
   scoring pass.
+- Exposed cached-scoring artifact types, `read_segment_jsonl`, and
+  `MetricConfig` from the top-level Python package API.
 - Reduced source-only audit and TM-baseline retrieval work by querying only the
   nearest source neighbor unless pair exposure is being computed.
 - Moved native pair-exposure reranking into a batched Rust path to reduce
