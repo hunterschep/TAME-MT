@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import platform
 import tempfile
 import time
@@ -10,6 +9,7 @@ from pathlib import Path
 
 from tame_mt import IndexConfig, ScoreConfig, TameScorer, load_index_bundle, save_index_bundle
 from tame_mt.exceptions import TameMTError
+from tame_mt.json_utils import strict_json_dumps
 from tame_mt.native import native_status
 
 
@@ -73,7 +73,7 @@ def main() -> int:
             refs=refs,
             config=config,
         )
-    print(json.dumps(payload, indent=2, sort_keys=True))
+    print(strict_json_dumps(payload, indent=2, sort_keys=True))
 
     if args.assert_thresholds and elapsed > max_seconds:
         raise SystemExit(

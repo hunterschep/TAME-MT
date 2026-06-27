@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from typing import Any
+
+from tame_mt.json_utils import strict_json_dumps
 
 
 @dataclass
@@ -98,4 +99,4 @@ class TameReport:
         }
 
     def to_json(self, *, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, allow_nan=False)
+        return strict_json_dumps(self.to_dict(), ensure_ascii=False, indent=indent)

@@ -102,6 +102,24 @@ def test_read_segment_jsonl_rejects_non_finite_float(tmp_path: Path) -> None:
         read_segment_jsonl(path)
 
 
+def test_read_segment_jsonl_rejects_non_standard_json_constant(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = json.dumps(_payload(0), ensure_ascii=False)[:-1] + ', "ignored": NaN}\n'
+    path.write_text(row, encoding="utf-8")
+
+    with pytest.raises(InputDataError, match="invalid JSON"):
+        read_segment_jsonl(path)
+
+
+def test_read_segment_jsonl_rejects_duplicate_json_key(tmp_path: Path) -> None:
+    path = tmp_path / "segments.jsonl"
+    row = json.dumps(_payload(0), ensure_ascii=False)[:-1] + ', "index": 1}\n'
+    path.write_text(row, encoding="utf-8")
+
+    with pytest.raises(InputDataError, match="invalid JSON"):
+        read_segment_jsonl(path)
+
+
 def test_read_segment_jsonl_reports_invalid_required_index(tmp_path: Path) -> None:
     path = tmp_path / "segments.jsonl"
     row = _payload(0)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -11,6 +10,7 @@ from tame_mt.exact import build_exact_pair_keys
 from tame_mt.exceptions import BackendError, ConfigurationError, InputDataError
 from tame_mt.index import NgramInvertedIndex
 from tame_mt.io import ensure_parent_dir, validate_equal_lengths
+from tame_mt.json_utils import strict_json_dumps, strict_json_loads
 from tame_mt.native import native_index_from_bytes
 from tame_mt.report import config_to_dict
 from tame_mt.version import __version__
@@ -102,7 +102,10 @@ def save_index_bundle(
         compression=ZIP_COMPRESSION,
         compresslevel=ZIP_COMPRESSLEVEL,
     ) as archive:
-        archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        archive.writestr(
+            MANIFEST_NAME,
+            strict_json_dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        )
         archive.writestr(TRAIN_SRC_NAME, _encode_lines(train_src))
         if train_tgt is not None:
             archive.writestr(TRAIN_TGT_NAME, _encode_lines(train_tgt))
@@ -252,8 +255,8 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         raise ConfigurationError("index bundle manifest is not valid UTF-8") from exc
     try:
-        manifest = json.loads(payload)
-    except json.JSONDecodeError as exc:
+        manifest = strict_json_loads(payload)
+    except ValueError as exc:
         raise ConfigurationError(f"index bundle manifest is invalid JSON: {exc}") from exc
     if not isinstance(manifest, dict):
         raise ConfigurationError("index bundle manifest must be a JSON object")
@@ -524,4 +527,4 @@ def _decode_exact_pair_keys(payload: bytes) -> set[str]:
 
 
 def _jsonable(value: Any) -> Any:
-    return json.loads(json.dumps(value, ensure_ascii=False))
+    return strict_json_loads(strict_json_dumps(value, ensure_ascii=False))

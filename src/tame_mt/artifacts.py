@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from math import isfinite
 from pathlib import Path
 from typing import Any, TypeVar
 
 from tame_mt.exceptions import InputDataError
 from tame_mt.io import open_text
+from tame_mt.json_utils import strict_json_loads
 from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 SegmentRow = TypeVar("SegmentRow", SegmentExposure, SegmentTMResult)
@@ -22,8 +22,8 @@ def read_segment_jsonl(path: str | Path) -> tuple[list[SegmentExposure], list[Se
                 if not line.strip():
                     continue
                 try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError as exc:
+                    payload = strict_json_loads(line)
+                except ValueError as exc:
                     raise InputDataError(
                         f"segment JSONL line {line_number} is invalid JSON"
                     ) from exc

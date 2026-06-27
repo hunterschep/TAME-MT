@@ -128,6 +128,8 @@ Consumers should treat `index` as the authoritative original segment position.
 and sorts valid rows by index before scoring. `--num-train` must be the positive
 training segment count used to create the segment diagnostics.
 
-All numeric JSON values are finite JSON numbers. Cached segment diagnostics with
-`NaN`, `Infinity`, or `-Infinity` numeric strings are rejected on read, and
-report writers use strict JSON serialization.
+All numeric JSON values are finite JSON numbers. Cached segment diagnostics and
+index-bundle manifests are parsed as strict JSON, so non-standard `NaN`,
+`Infinity`, and `-Infinity` constants and duplicate object keys are rejected
+even outside fields TAME-MT uses directly. Report writers use strict JSON
+serialization.

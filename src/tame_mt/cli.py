@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import platform
 import sys
 from collections.abc import Callable
@@ -25,6 +24,7 @@ from tame_mt.config import (
 )
 from tame_mt.exceptions import TameMTError
 from tame_mt.io import ensure_parent_dir, open_text, read_lines, write_lines
+from tame_mt.json_utils import strict_json_dumps
 from tame_mt.native import native_status
 from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
 from tame_mt.report import render_text_report, write_json_report, write_segment_jsonl
@@ -339,7 +339,7 @@ def run_index_build(args: argparse.Namespace) -> int:
 
 def run_index_inspect(args: argparse.Namespace) -> int:
     manifest = inspect_index_bundle(args.path)
-    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    print(strict_json_dumps(manifest, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -358,7 +358,7 @@ def run_tm_baseline(args: argparse.Namespace) -> int:
         with open_text(metadata_path, "w") as handle:
             for item in result.tm_results:
                 handle.write(
-                    json.dumps(
+                    strict_json_dumps(
                         {
                             "index": item.index,
                             "tm_source_index": item.tm_source_index,

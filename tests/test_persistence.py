@@ -104,6 +104,24 @@ def test_inspect_index_bundle_rejects_duplicate_manifest_member(tmp_path: Path) 
         inspect_index_bundle(path)
 
 
+def test_inspect_index_bundle_rejects_non_standard_json_constant(tmp_path: Path) -> None:
+    path = tmp_path / "bad.tameidx"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", '{"format": NaN}\n')
+
+    with pytest.raises(ConfigurationError, match="non-standard JSON constant"):
+        inspect_index_bundle(path)
+
+
+def test_inspect_index_bundle_rejects_duplicate_json_key(tmp_path: Path) -> None:
+    path = tmp_path / "bad.tameidx"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", '{"format": "tameidx", "format": "other"}\n')
+
+    with pytest.raises(ConfigurationError, match="duplicate JSON object key"):
+        inspect_index_bundle(path)
+
+
 def test_load_index_bundle_reports_invalid_num_train_manifest(tmp_path: Path) -> None:
     pytest.importorskip("tame_mt._native")
     path = tmp_path / "train.tameidx"
