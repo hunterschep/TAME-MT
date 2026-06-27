@@ -21,9 +21,14 @@ Run a larger local check:
 
 ```bash
 python benchmarks/bench_synthetic.py \
-  --train-size 50000 \
+  --train-size 100000 \
   --test-size 2000 \
-  --index-mode auto
+  --staged \
+  --max-seconds 12 \
+  --max-index-build-seconds 8 \
+  --max-indexed-seconds 4 \
+  --max-cached-seconds 3 \
+  --assert-thresholds
 ```
 
 For public-corpus timing, use:

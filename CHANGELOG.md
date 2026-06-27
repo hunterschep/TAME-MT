@@ -40,6 +40,9 @@
 - Extended the synthetic benchmark with staged index-build, indexed-audit, and
   cached-scoring timings.
 - Made staged benchmark indexed timings include persisted `.tameidx` load time.
+- Tightened release acceptance performance checks to cover the 100k staged
+  benchmark path with explicit build, indexed-audit, and cached-score
+  thresholds.
 - Replaced inline wheel smoke tests with a cross-platform script covering gzip
   IO, index reuse, cached scoring, and TM metadata outputs.
 - Added clean-venv built-wheel smoke testing to the acceptance script.

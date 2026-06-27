@@ -16,7 +16,11 @@ python benchmarks/bench_synthetic.py --small --staged --assert-thresholds
 python benchmarks/bench_synthetic.py \
   --train-size 100000 \
   --test-size 2000 \
-  --max-seconds 30 \
+  --staged \
+  --max-seconds 12 \
+  --max-index-build-seconds 8 \
+  --max-indexed-seconds 4 \
+  --max-cached-seconds 3 \
   --assert-thresholds
 
 rm -rf build dist src/tame_mt.egg-info
