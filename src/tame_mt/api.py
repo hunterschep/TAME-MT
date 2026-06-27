@@ -7,8 +7,8 @@ from tame_mt.artifacts import validate_segment_artifacts
 from tame_mt.bins import (
     ALL_GROUP,
     TM_GROUP,
-    _build_bin_group_index,
-    _build_bin_reports,
+    build_bin_group_index,
+    build_bin_reports,
     compute_generalization_gap,
     score_corpus_and_bins,
 )
@@ -64,7 +64,7 @@ class CachedSegmentScorer:
         validate_equal_lengths("segments", self.exposures, "tm_hyp", self.tm_hyp)
 
         self.exposure_summary = summarize_exposures(self.exposures, self.config)
-        self._bin_index = _build_bin_group_index(self.exposures)
+        self._bin_index = build_bin_group_index(self.exposures)
         self._group_scorer = PreparedGroupScorer(self.refs, self._bin_index.groups, self.config)
         self._tm_group_scores = self._group_scorer.score_systems({TM_GROUP: self.tm_hyp})[TM_GROUP]
         self.tm_scores = self._tm_group_scores[ALL_GROUP]
@@ -87,7 +87,7 @@ class CachedSegmentScorer:
         for system_name, system_group_scores in grouped_scores.items():
             system_scores = system_group_scores[ALL_GROUP]
             deltas = delta_scores(system_scores, self.tm_scores, self.config.metrics)
-            bin_reports = _build_bin_reports(
+            bin_reports = build_bin_reports(
                 self._bin_index,
                 system_group_scores,
                 self._tm_group_scores,

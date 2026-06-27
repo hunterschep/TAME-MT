@@ -71,7 +71,7 @@ def score_corpus_and_bins(
     exposures: list[SegmentExposure],
     config: ScoreConfig,
 ) -> BinScoringResult:
-    bin_index = _build_bin_group_index(exposures)
+    bin_index = build_bin_group_index(exposures)
     grouped_scores = score_systems_by_groups(
         {"system": hyp, "tm": tm_hyp},
         refs,
@@ -83,7 +83,7 @@ def score_corpus_and_bins(
     return BinScoringResult(
         system_scores=system_group_scores[ALL_GROUP],
         tm_scores=tm_group_scores[ALL_GROUP],
-        bin_reports=_build_bin_reports(
+        bin_reports=build_bin_reports(
             bin_index,
             system_group_scores,
             tm_group_scores,
@@ -101,7 +101,7 @@ def score_many_corpus_and_bins(
 ) -> MultiBinScoringResult:
     if TM_GROUP in systems:
         raise ValueError(f"{TM_GROUP!r} is reserved for internal TM scoring")
-    bin_index = _build_bin_group_index(exposures)
+    bin_index = build_bin_group_index(exposures)
     grouped_scores = score_systems_by_groups(
         {**systems, TM_GROUP: tm_hyp},
         refs,
@@ -115,7 +115,7 @@ def score_many_corpus_and_bins(
         },
         tm_scores=tm_group_scores[ALL_GROUP],
         bin_reports={
-            system_name: _build_bin_reports(
+            system_name: build_bin_reports(
                 bin_index,
                 grouped_scores[system_name],
                 tm_group_scores,
@@ -146,7 +146,9 @@ def compute_generalization_gap(
     return gap
 
 
-def _build_bin_group_index(exposures: list[SegmentExposure]) -> BinGroupIndex:
+def build_bin_group_index(exposures: list[SegmentExposure]) -> BinGroupIndex:
+    """Build reusable exposure-bin groups for corpus and cached scoring."""
+
     num_test = len(exposures)
     bin_groups: dict[str, list[int]] = {name: [] for name in BIN_ORDER}
     source_sums = {name: 0.0 for name in BIN_ORDER}
@@ -171,12 +173,14 @@ def _build_bin_group_index(exposures: list[SegmentExposure]) -> BinGroupIndex:
     )
 
 
-def _build_bin_reports(
+def build_bin_reports(
     bin_index: BinGroupIndex,
     system_group_scores: dict[str, dict[str, float | None]],
     tm_group_scores: dict[str, dict[str, float | None]],
     config: ScoreConfig,
 ) -> list[BinReport]:
+    """Render per-bin reports from precomputed grouped system and TM scores."""
+
     reports: list[BinReport] = []
     for name in BIN_ORDER:
         system_scores = system_group_scores[name]
