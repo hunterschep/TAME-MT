@@ -19,6 +19,11 @@ Default backend: auto -> native_exact/native_fast
 If it is unavailable, `auto` falls back to the pure-Python exact/fast backends.
 That fallback preserves usability, but large audits will be slower.
 
+If `doctor` reports a native backend version mismatch, rebuild or reinstall the
+package. TAME-MT refuses to use a compiled extension whose version differs from
+the Python package version, because stale native code could change persistence
+or nearest-neighbor behavior without changing the report signature.
+
 ## Build From Source
 
 Install Rust and then run:

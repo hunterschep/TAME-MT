@@ -29,6 +29,9 @@
   local smoke timing while preserving fast indexed reuse.
 - Added explicit `.tameidx` bundle and native index schema versioning so
   incompatible persisted indexes fail with clear rebuild guidance.
+- Made native backend availability require the compiled extension version to
+  match the Python package version, preventing stale editable builds from being
+  selected silently.
 - Hardened `.tameidx` loading with strict manifest types, duplicate-member
   rejection, and manifest-vs-ZIP member size checks before native index
   deserialization.

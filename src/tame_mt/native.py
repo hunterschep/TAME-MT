@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
 
+from tame_mt.version import __version__
+
 
 @dataclass(frozen=True)
 class NativeStatus:
@@ -18,7 +20,23 @@ def native_status() -> NativeStatus:
     except Exception as exc:  # pragma: no cover - depends on install mode
         return NativeStatus(available=False, version=None, error=str(exc))
 
-    version = str(module.native_version())
+    try:
+        version = _module_version(module)
+    except Exception as exc:  # pragma: no cover - defensive against broken extensions
+        return NativeStatus(
+            available=False,
+            version=None,
+            error=f"native backend version probe failed: {exc}",
+        )
+    if version != __version__:
+        return NativeStatus(
+            available=False,
+            version=version,
+            error=(
+                f"native backend version {version} does not match "
+                f"Python package version {__version__}"
+            ),
+        )
     return NativeStatus(available=True, version=version, error=None)
 
 
@@ -35,7 +53,7 @@ def build_native_index(
     max_candidates: int,
     rerank_limit: int,
 ) -> Any:
-    module = import_module("tame_mt._native")
+    module = _load_native_module()
     return module.NativeNgramIndex(
         normalized_lines,
         list(ngram_orders),
@@ -52,5 +70,19 @@ def native_index_to_bytes(native_index: Any) -> bytes:
 
 
 def native_index_from_bytes(data: bytes) -> Any:
-    module = import_module("tame_mt._native")
+    module = _load_native_module()
     return module.NativeNgramIndex.from_bytes(data)
+
+
+def _load_native_module() -> Any:
+    module = import_module("tame_mt._native")
+    version = _module_version(module)
+    if version != __version__:
+        raise RuntimeError(
+            f"native backend version {version} does not match Python package version {__version__}"
+        )
+    return module
+
+
+def _module_version(module: Any) -> str:
+    return str(module.native_version())
