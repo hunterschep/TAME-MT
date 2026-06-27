@@ -44,6 +44,9 @@ def validate_segment_artifacts(
         raise InputDataError(
             "segment artifact is inconsistent: exposure and TM rows have different counts"
         )
+    if _is_aligned_contiguous(exposures, tm_results):
+        return exposures, tm_results
+
     exposure_by_index = _unique_by_index(exposures, "exposure")
     tm_by_index = _unique_by_index(tm_results, "tm_result")
     exposure_indices = set(exposure_by_index)
@@ -78,6 +81,16 @@ def validate_segment_artifacts(
     return (
         [exposure_by_index[index] for index in ordered_indices],
         [tm_by_index[index] for index in ordered_indices],
+    )
+
+
+def _is_aligned_contiguous(
+    exposures: list[SegmentExposure],
+    tm_results: list[SegmentTMResult],
+) -> bool:
+    return all(
+        exposure.index == expected and tm_result.index == expected
+        for expected, (exposure, tm_result) in enumerate(zip(exposures, tm_results, strict=True))
     )
 
 

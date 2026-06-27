@@ -40,3 +40,15 @@ def test_exact_pair_overlap_is_exact() -> None:
     )
     assert exposures[0].pair_exact is True
     assert exposures[0].pair_exposure == 1.0
+
+
+def test_pair_fields_are_absent_without_references() -> None:
+    exposures = compute_exposure(
+        train_src=["a b c"],
+        train_tgt=["x y z"],
+        test_src=["a b c"],
+        refs=None,
+        config=ScoreConfig(),
+    )
+    assert exposures[0].pair_exact is None
+    assert exposures[0].pair_exposure is None

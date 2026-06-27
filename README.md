@@ -613,6 +613,10 @@ on that benchmark. At 100,000 train / 10,000 test, the same path takes about
 4.3 seconds fresh, about 2.9 seconds from a saved `.tameidx`, and about 2.3
 seconds for cached scoring. The cached stage is the closest analogue to
 ordinary BLEU/chrF scoring because it no longer touches the training corpus.
+Ordered cached artifacts take a fast validation path, and whole-corpus
+SacreBLEU statistics are reused without copying before bin aggregation.
+Source-only audits and `tm-baseline` queries also use top-1 source retrieval
+unless pair exposure is being computed.
 
 For production evaluation, use a staged workflow:
 

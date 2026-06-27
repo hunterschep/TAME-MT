@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from tame_mt.artifacts import read_segment_jsonl
+from tame_mt.artifacts import read_segment_jsonl, validate_segment_artifacts
 from tame_mt.exceptions import InputDataError
+from tame_mt.schema import SegmentExposure, SegmentTMResult
 
 
 def _payload(index: int) -> dict[str, object]:
@@ -31,6 +32,18 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def test_validate_segment_artifacts_keeps_aligned_rows() -> None:
+    exposures = [
+        SegmentExposure(0, 1.0, 0, True, None, None, None, None, None, None, "source_exact")
+    ]
+    tm_results = [SegmentTMResult(0, "tm 0", 0, 1.0)]
+
+    validated_exposures, validated_tm_results = validate_segment_artifacts(exposures, tm_results)
+
+    assert validated_exposures is exposures
+    assert validated_tm_results is tm_results
 
 
 def test_read_segment_jsonl_sorts_valid_reordered_rows(tmp_path: Path) -> None:

@@ -49,6 +49,11 @@
 - Optimized cached and repeated scoring by aggregating SacreBLEU segment
   statistics once per metric/system instead of rescoring every exposure bin
   separately.
+- Reduced cached-scoring allocation by fast-pathing already ordered segment
+  artifacts, building exposure-bin groups in one pass, and reusing whole-corpus
+  SacreBLEU statistics without copying.
+- Reduced source-only audit and TM-baseline retrieval work by querying only the
+  nearest source neighbor unless pair exposure is being computed.
 - Moved native pair-exposure reranking into a batched Rust path to reduce
   Python/Rust boundary overhead in large indexed audits.
 - Hardened text-file decoding so invalid UTF-8 in corpus or cached segment

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import sacrebleu
@@ -33,7 +33,7 @@ def score_sacre_metric_groups(
     metric: str,
     hyps: list[str],
     refs: list[list[str]],
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     config: MetricConfig,
 ) -> dict[str, float | None]:
     """Score one SacreBLEU metric for multiple index groups in one stats pass."""
@@ -51,7 +51,7 @@ def score_sacre_metric_groups_for_systems(
     metric: str,
     systems: Mapping[str, list[str]],
     refs: list[list[str]],
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     config: MetricConfig,
 ) -> dict[str, dict[str, float | None]]:
     """Score one SacreBLEU metric for multiple systems and groups.
@@ -77,16 +77,28 @@ def score_sacre_metric_groups_for_systems(
 def _aggregate_groups(
     scorer: Any,
     segment_stats: list[Any],
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
 ) -> dict[str, float | None]:
     results: dict[str, float | None] = {}
     for name, indices in groups.items():
         if not indices:
             results[name] = None
             continue
-        group_stats = [segment_stats[index] for index in indices]
+        group_stats = (
+            segment_stats
+            if _is_full_span(indices, len(segment_stats))
+            else [segment_stats[index] for index in indices]
+        )
         results[name] = float(scorer._aggregate_and_compute(group_stats).score)
     return results
+
+
+def _is_full_span(indices: Sequence[int], length: int) -> bool:
+    if len(indices) != length:
+        return False
+    if isinstance(indices, range):
+        return indices.start == 0 and indices.stop == length and indices.step == 1
+    return all(index == position for position, index in enumerate(indices))
 
 
 def _supports_segment_stats(scorer: Any) -> bool:
@@ -99,7 +111,7 @@ def _score_metric_groups_public(
     metric: str,
     systems: Mapping[str, list[str]],
     refs: list[list[str]],
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     config: MetricConfig,
 ) -> dict[str, dict[str, float | None]]:
     return {
@@ -112,7 +124,7 @@ def _score_public_groups(
     metric: str,
     hyps: list[str],
     refs: list[list[str]],
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     config: MetricConfig,
 ) -> dict[str, float | None]:
     results: dict[str, float | None] = {}

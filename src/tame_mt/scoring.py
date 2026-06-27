@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from tame_mt.config import ScoreConfig
 from tame_mt.metrics.sacre import (
@@ -44,7 +44,7 @@ def score_metrics(
 def score_metrics_by_groups(
     hyps: list[str] | None,
     refs: list[list[str]] | None,
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     config: ScoreConfig,
 ) -> GroupedScores:
     results = _empty_group_scores(groups, config.metrics)
@@ -61,7 +61,7 @@ def score_metrics_by_groups(
 def score_systems_by_groups(
     systems: Mapping[str, list[str] | None],
     refs: list[list[str]] | None,
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     config: ScoreConfig,
 ) -> SystemGroupedScores:
     results: SystemGroupedScores = {
@@ -107,7 +107,7 @@ def delta_scores(
 
 
 def _empty_group_scores(
-    groups: Mapping[str, list[int]],
+    groups: Mapping[str, Sequence[int]],
     metrics: tuple[str, ...],
 ) -> GroupedScores:
     return {group_name: {metric: None for metric in metrics} for group_name in groups}

@@ -107,7 +107,14 @@ well as runtime ceilings.
 The cached path still runs SacreBLEU/chrF over system and TM outputs, but it no
 longer touches the training corpus. TAME-MT aggregates SacreBLEU segment
 statistics once per metric and output, then reuses those statistics for the
-whole corpus and all exposure bins. If a future SacreBLEU release changes those
+whole corpus and all exposure bins without copying the full segment-stat list
+again. Ordered cached segment artifacts also take a fast validation path before
+scoring, while malformed or reordered artifacts still go through the full
+duplicate/missing-index validator. If a future SacreBLEU release changes those
 internal segment-stat APIs, TAME-MT falls back to SacreBLEU's public corpus
 scoring APIs so scoring remains correct, with reduced bin-scoring performance
 until the optimized adapter is updated.
+
+When pair exposure is not requested, for example `tm-baseline` or source-only
+audits without references, TAME-MT queries only the nearest source neighbor
+instead of the configured pair-candidate `top-k`.

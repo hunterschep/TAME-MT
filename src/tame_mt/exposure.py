@@ -57,7 +57,8 @@ def compute_exposure_result(
             train_src, train_tgt, source_index, target_index, config
         )
 
-    retrieval_k = max(1, config.index.topk)
+    needs_pair_candidates = target_index is not None and refs is not None
+    retrieval_k = max(1, config.index.topk if needs_pair_candidates else 1)
     normalized_test_src = [source_index.normalized(source) for source in test_src]
     source_tops_by_segment = source_index.batch_query_topk_normalized(
         normalized_test_src, retrieval_k
@@ -106,7 +107,7 @@ def compute_exposure_result(
                 in exact_pair_keys
                 for ref_idx in range(len(ref_texts))
             )
-            if exact_pair_keys is not None
+            if exact_pair_keys is not None and refs is not None
             else None
         )
         pair_nn = (

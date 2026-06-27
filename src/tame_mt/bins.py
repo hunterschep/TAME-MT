@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import mean
 
 from tame_mt.config import BinConfig, ScoreConfig
 from tame_mt.schema import BinReport, SegmentExposure
@@ -56,16 +55,17 @@ def score_corpus_and_bins(
     config: ScoreConfig,
 ) -> BinScoringResult:
     num_test = len(exposures)
-    segments_by_bin = {
-        name: [segment for segment in exposures if segment.bin == name] for name in BIN_ORDER
-    }
-    groups = {
-        ALL_GROUP: [segment.index for segment in exposures],
-        **{
-            name: [segment.index for segment in segments]
-            for name, segments in segments_by_bin.items()
-        },
-    }
+    bin_groups: dict[str, list[int]] = {name: [] for name in BIN_ORDER}
+    source_sums = {name: 0.0 for name in BIN_ORDER}
+    aligned_indices = True
+    for expected_index, segment in enumerate(exposures):
+        if segment.index != expected_index:
+            aligned_indices = False
+        if segment.bin in bin_groups:
+            bin_groups[segment.bin].append(segment.index)
+            source_sums[segment.bin] += segment.source_exposure
+    all_indices = range(num_test) if aligned_indices else [segment.index for segment in exposures]
+    groups = {ALL_GROUP: all_indices, **bin_groups}
     grouped_scores = score_systems_by_groups(
         {"system": hyp, "tm": tm_hyp},
         refs,
@@ -77,17 +77,15 @@ def score_corpus_and_bins(
 
     reports: list[BinReport] = []
     for name in BIN_ORDER:
-        segments = segments_by_bin[name]
+        count = len(bin_groups[name])
         system_scores = system_group_scores[name]
         tm_scores = tm_group_scores[name]
         reports.append(
             BinReport(
                 name=name,
-                count=len(segments),
-                percentage=(len(segments) / num_test) if num_test else 0.0,
-                mean_source_exposure=(
-                    mean(segment.source_exposure for segment in segments) if segments else None
-                ),
+                count=count,
+                percentage=(count / num_test) if num_test else 0.0,
+                mean_source_exposure=(source_sums[name] / count if count else None),
                 system_scores=system_scores,
                 tm_scores=tm_scores,
                 delta_scores=delta_scores(system_scores, tm_scores, config.metrics),
