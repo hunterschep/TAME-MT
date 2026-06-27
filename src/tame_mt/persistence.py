@@ -405,9 +405,9 @@ def _manifest_int(manifest: dict[str, Any], key: str) -> int:
     value = manifest.get(key)
     if value is None:
         raise ConfigurationError(f"index bundle manifest field {key} must be an integer")
-    if isinstance(value, bool) or not isinstance(value, int):
+    if type(value) is not int:
         raise ConfigurationError(f"index bundle manifest field {key} must be an integer")
-    return cast(int, value)
+    return value
 
 
 def _manifest_bool(manifest: dict[str, Any], key: str) -> bool:
@@ -465,11 +465,11 @@ def _storage_int(storage: dict[str, Any], key: str) -> int:
     value = storage.get(key)
     if value is None:
         raise ConfigurationError(f"index bundle storage field {key} must be an integer")
-    if isinstance(value, bool) or not isinstance(value, int):
+    if type(value) is not int:
         raise ConfigurationError(f"index bundle storage field {key} must be an integer")
     if value < 0:
         raise ConfigurationError(f"index bundle storage field {key} must be non-negative")
-    return cast(int, value)
+    return value
 
 
 def _positive_storage_int(storage: dict[str, Any], key: str) -> int:
