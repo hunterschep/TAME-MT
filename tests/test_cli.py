@@ -354,6 +354,30 @@ def test_cli_reports_invalid_utf8_text_inputs(tmp_path: Path, capsys) -> None:
     assert "not valid UTF-8" in captured.err
 
 
+def test_cli_reports_invalid_gzip_text_inputs(tmp_path: Path, capsys) -> None:
+    bad_hyp = tmp_path / "bad.out.gz"
+    bad_hyp.write_bytes(b"not gzip")
+    rc = main(
+        [
+            "score",
+            "--train-src",
+            str(FIXTURES / "train.src"),
+            "--train-tgt",
+            str(FIXTURES / "train.tgt"),
+            "--test-src",
+            str(FIXTURES / "test.src"),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(bad_hyp),
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "not a valid gzip file" in captured.err
+
+
 def test_cli_score_cached_reports_invalid_utf8_segment_jsonl(
     tmp_path: Path,
     capsys,
@@ -377,6 +401,31 @@ def test_cli_score_cached_reports_invalid_utf8_segment_jsonl(
     captured = capsys.readouterr()
     assert rc == 2
     assert "not valid UTF-8" in captured.err
+
+
+def test_cli_score_cached_reports_invalid_gzip_segment_jsonl(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    bad_segments = tmp_path / "bad.jsonl.gz"
+    bad_segments.write_bytes(b"not gzip")
+    rc = main(
+        [
+            "score-cached",
+            "--segment-in",
+            str(bad_segments),
+            "--ref",
+            str(FIXTURES / "test.ref"),
+            "--hyp",
+            str(FIXTURES / "hyp.out"),
+            "--num-train",
+            "4",
+            "--quiet",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "not a valid gzip file" in captured.err
 
 
 def test_cli_score_cached_rejects_non_positive_num_train(tmp_path: Path, capsys) -> None:

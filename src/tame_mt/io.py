@@ -31,12 +31,15 @@ def write_lines(path: str | Path, lines: list[str]) -> None:
 @contextmanager
 def open_text(path: str | Path, mode: TextMode) -> Iterator[TextIO]:
     text_path = Path(path)
-    if text_path.suffix == ".gz":
-        with gzip.open(text_path, f"{mode}t", encoding="utf-8") as handle:
-            yield cast(TextIO, handle)
-    else:
-        with text_path.open(mode, encoding="utf-8") as handle:
-            yield handle
+    try:
+        if text_path.suffix == ".gz":
+            with gzip.open(text_path, f"{mode}t", encoding="utf-8") as handle:
+                yield cast(TextIO, handle)
+        else:
+            with text_path.open(mode, encoding="utf-8") as handle:
+                yield handle
+    except gzip.BadGzipFile as exc:
+        raise InputDataError(f"{text_path} is not a valid gzip file") from exc
 
 
 def ensure_parent_dir(path: str | Path) -> None:

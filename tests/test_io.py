@@ -27,6 +27,14 @@ def test_read_lines_rejects_invalid_utf8(tmp_path: Path) -> None:
         read_lines(path)
 
 
+def test_read_lines_rejects_invalid_gzip(tmp_path: Path) -> None:
+    path = tmp_path / "bad.txt.gz"
+    path.write_bytes(b"not gzip")
+
+    with pytest.raises(InputDataError, match="not a valid gzip file"):
+        read_lines(path)
+
+
 def test_validate_corpus_inputs_rejects_empty_train_or_test() -> None:
     with pytest.raises(InputDataError, match="train.src"):
         validate_corpus_inputs([], [], ["x"], [["y"]], ["z"])

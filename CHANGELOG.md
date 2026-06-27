@@ -34,6 +34,8 @@
   Python/Rust boundary overhead in large indexed audits.
 - Hardened text-file decoding so invalid UTF-8 in corpus or cached segment
   artifacts produces user-facing TAME-MT errors instead of raw tracebacks.
+- Hardened malformed gzip handling so compressed corpus and cached segment
+  inputs produce user-facing TAME-MT input errors.
 - Tightened API and cached-scoring validation for empty references and
   non-positive training counts.
 - Removed an unused experimental weighted-BLEU helper from the package surface.
