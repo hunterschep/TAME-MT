@@ -76,3 +76,34 @@ def test_grouped_scores_fall_back_when_sacrebleu_stats_api_is_unavailable(
     assert grouped["all"] == score_metrics(hyps, refs, config)
     assert grouped["tail"] == score_metrics(hyps[1:], [refs[0][1:]], config)
     assert grouped["empty"] == {"bleu": None, "chrf": None}
+
+
+def test_grouped_scores_fall_back_when_sacrebleu_stats_api_drifts_late(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ScoreConfig(metrics=("bleu",))
+    hyps = ["hello world", "good day", "fresh sentence"]
+    refs = [["hello world", "good morning", "fresh sentence"]]
+    groups = {"all": [0, 1, 2], "tail": [1, 2]}
+    real_builder = sacre._build_sacre_metric
+
+    class FlakyMetric:
+        def __init__(self) -> None:
+            self._real = real_builder("bleu", config.metric, refs)
+            self._extract_calls = 0
+
+        def _extract_corpus_statistics(self, *args: object) -> object:
+            self._extract_calls += 1
+            if self._extract_calls > 2:
+                raise RuntimeError("simulated SacreBLEU stats API drift")
+            return self._real._extract_corpus_statistics(*args)
+
+        def _compute_score_from_stats(self, *args: object) -> object:
+            return self._real._compute_score_from_stats(*args)
+
+    monkeypatch.setattr(sacre, "_build_sacre_metric", lambda *args, **kwargs: FlakyMetric())
+
+    grouped = score_metrics_by_groups(hyps, refs, groups, config)
+
+    assert grouped["all"] == score_metrics(hyps, refs, config)
+    assert grouped["tail"] == score_metrics(hyps[1:], [refs[0][1:]], config)

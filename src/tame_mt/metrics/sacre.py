@@ -25,7 +25,7 @@ class PreparedSacreMetricGroupScorer:
         self.groups = tuple(groups.items())
         self.config = config
         self._scorer = _build_sacre_metric(metric, config, refs)
-        self._use_segment_stats = _supports_segment_stats(self._scorer)
+        self._use_segment_stats = _supports_segment_stats(self._scorer, refs)
 
     def score_systems(self, systems: Mapping[str, list[str]]) -> dict[str, dict[str, float | None]]:
         if not self._use_segment_stats:
@@ -43,7 +43,7 @@ class PreparedSacreMetricGroupScorer:
                 segment_stats = self._scorer._extract_corpus_statistics(hyps, None)
                 results[system_name] = _aggregate_groups(self._scorer, segment_stats, self.groups)
             return results
-        except (AttributeError, TypeError):
+        except Exception:
             self._use_segment_stats = False
             return _score_metric_groups_public(
                 self.metric,
@@ -150,10 +150,25 @@ def _is_full_span(indices: Sequence[int], length: int) -> bool:
     return all(index == position for position, index in enumerate(indices))
 
 
-def _supports_segment_stats(scorer: Any) -> bool:
-    return callable(getattr(scorer, "_extract_corpus_statistics", None)) and callable(
-        getattr(scorer, "_compute_score_from_stats", None)
-    )
+def _supports_segment_stats(scorer: Any, refs: list[list[str]]) -> bool:
+    extract_stats = getattr(scorer, "_extract_corpus_statistics", None)
+    score_from_stats = getattr(scorer, "_compute_score_from_stats", None)
+    if not callable(extract_stats) or not callable(score_from_stats):
+        return False
+    if not refs or any(not ref for ref in refs):
+        return True
+
+    probe_refs = [[ref[0]] for ref in refs]
+    probe_hyps = [probe_refs[0][0]]
+    try:
+        for ref_arg in (None, probe_refs):
+            segment_stats = extract_stats(probe_hyps, ref_arg)
+            if not isinstance(segment_stats, list) or len(segment_stats) != 1:
+                return False
+            score_from_stats(segment_stats[0])
+    except Exception:
+        return False
+    return True
 
 
 def _score_metric_groups_public(
