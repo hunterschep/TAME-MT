@@ -1,31 +1,106 @@
 # TAME-MT
 
-Training-Aware Machine Translation Evaluation for Machine Translation.
+[![CI](https://github.com/hunterschep/TAME-MT/actions/workflows/ci.yml/badge.svg)](https://github.com/hunterschep/TAME-MT/actions/workflows/ci.yml)
+[![Wheels](https://github.com/hunterschep/TAME-MT/actions/workflows/wheels.yml/badge.svg)](https://github.com/hunterschep/TAME-MT/actions/workflows/wheels.yml)
 
-TAME-MT is a command-line tool and Python package that explains MT scores in
-light of the data the model was trained on. It does not replace BLEU or chrF.
-It answers a different question:
+**Training-Aware Machine Translation Evaluation.**
 
-> How much of this system's measured quality is earned on test examples that
-> are close to the training corpus?
+TAME-MT is a command-line tool and Python package for evaluating machine
+translation systems while accounting for the data they were trained on.
 
-That question matters in low-resource MT because train and test data often come
-from narrow domains: Bible text, government forms, education materials, health
-leaflets, NGO documents, oral narratives, or a small number of web sources.
-High BLEU on a highly exposed test set can be a valid in-domain result, but it
-is weaker evidence of broad general-purpose translation ability.
+Standard MT metrics such as BLEU and chrF answer:
 
-TAME-MT makes that visible by reporting:
+> How close are the system translations to the references?
 
-| Number | Meaning |
+TAME-MT keeps those scores, but adds a second question:
+
+> How close is each test example to the training corpus?
+
+That second question matters because many MT benchmarks, especially
+low-resource benchmarks, are built from narrow and overlapping sources:
+scripture, government documents, educational text, health leaflets, NGO
+materials, oral narratives, dictionaries, crawled web pages, or small public
+corpora reused across projects. A high BLEU score on a train-similar test set
+can be a valid in-domain result, but it is weaker evidence of broad translation
+ability.
+
+TAME-MT makes this visible.
+
+It reports ordinary system quality, a nearest-neighbor translation-memory
+baseline built from the training corpus, train-test exposure scores,
+leakage-style overlap diagnostics, and quality broken out by distance from the
+training data.
+
+## Contents
+
+- [When To Use It](#when-to-use-it)
+- [What It Reports](#what-it-reports)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Large Corpora](#large-corpora)
+- [Many Systems](#many-systems)
+- [How To Read The Results](#how-to-read-the-results)
+- [How It Works](#how-it-works)
+- [The Math](#the-math)
+- [Command Line Reference](#command-line-reference)
+- [Python API](#python-api)
+- [Outputs And Reproducibility](#outputs-and-reproducibility)
+- [Package Architecture](#package-architecture)
+- [Performance](#performance)
+- [Privacy And Security](#privacy-and-security)
+- [Limitations](#limitations)
+- [Development And Contributing](#development-and-contributing)
+- [Release Process](#release-process)
+- [Citation](#citation)
+- [License](#license)
+
+## When To Use It
+
+Use TAME-MT when you have:
+
+- a machine translation training corpus;
+- a test source file;
+- one or more reference translation files;
+- one or more system output files;
+- a need to understand whether high scores come from broad generalization or
+  from test examples that look very close to training examples.
+
+TAME-MT is especially useful for:
+
+- low-resource MT evaluation;
+- benchmark audits before publishing scores;
+- comparing several MT systems on the same train/test split;
+- finding train-test exact overlaps and near duplicates;
+- reporting whether BLEU/chrF claims are mostly supported by far-from-training
+  examples or by near-training examples.
+
+TAME-MT is not a replacement for BLEU, chrF, COMET, human evaluation, or error
+analysis. It is a training-aware layer around corpus evaluation.
+
+## What It Reports
+
+| Output | Meaning |
 | --- | --- |
-| `BLEU`, `chrF` | Standard system quality scores. |
-| `TM-BLEU`, `TM-chrF` | Score of a training-set nearest-neighbor translation-memory baseline. |
+| `BLEU`, `chrF` | Standard corpus quality scores for the system output. |
+| `TM-BLEU`, `TM-chrF` | BLEU/chrF of a simple translation-memory baseline built from nearest training examples. |
 | `delta over TM` | System score minus translation-memory baseline score. |
-| `SourceExposure` | How similar each test source is to the closest training source. |
-| `PairLeak@0.85` | How many test source/reference pairs are close to the same training pair. |
-| `Far-BLEU` | BLEU on test examples far from the training source corpus. |
-| `GenGap-BLEU` | Near-bin BLEU minus far-bin BLEU. |
+| `SourceExposure` | For each test source, similarity to the closest training source. |
+| `TargetExposure` | For each reference, similarity to the closest training target. |
+| `PairExposure` | Whether a test source/reference pair is close to the same training source/target pair. |
+| `PairLeak@0.85` | Fraction of test pairs with pair exposure at least `0.85`. |
+| `source_exact` | Test source exactly appears in normalized training sources. |
+| `pair_exact` | Test source and reference exactly appear as a normalized training pair. |
+| `Far-BLEU`, `Far-chrF` | Quality on test examples far from the training source corpus. |
+| `GenGap-BLEU`, `GenGap-chrF` | Near-bin score minus far-bin score. |
+
+The shortest interpretation is:
+
+- high system score and high TM baseline means the benchmark is partly solvable
+  by training-set nearest-neighbor reuse;
+- high delta over TM means the system is doing more than that baseline;
+- strong far-bin scores are better evidence of generalization than strong
+  near-bin scores alone;
+- high PairLeak or exact-pair overlap should be reported next to raw MT scores.
 
 ## Installation
 
@@ -33,7 +108,13 @@ TAME-MT makes that visible by reporting:
 pip install tame-mt
 ```
 
-For local development:
+Check that the package and native backend are available:
+
+```bash
+tame-mt doctor
+```
+
+For local development from a checkout:
 
 ```bash
 pip install -e '.[dev]'
@@ -41,7 +122,7 @@ pip install -e '.[dev]'
 
 ## Quick Start
 
-TAME-MT expects aligned UTF-8 text files:
+TAME-MT expects aligned UTF-8 text files, one segment per line:
 
 ```text
 train.src     source side of the training corpus
@@ -51,7 +132,7 @@ test.ref      reference translation for the test set
 system.out    system hypothesis translations
 ```
 
-Run the full report:
+Run a full train-aware score:
 
 ```bash
 tame-mt score \
@@ -60,6 +141,43 @@ tame-mt score \
   --test-src test.src \
   --ref test.ref \
   --hyp system.out
+```
+
+Run the bundled toy example:
+
+```bash
+tame-mt score \
+  --train-src examples/toy/train.src \
+  --train-tgt examples/toy/train.tgt \
+  --test-src examples/toy/test.src \
+  --ref examples/toy/test.ref \
+  --hyp examples/toy/hyp.out
+```
+
+The toy report includes the main pieces:
+
+```text
+Quality
+-------
+Metric       System      TM baseline      delta over TM
+BLEU           85.02            59.00            +26.01
+chrF           85.45            61.73            +23.72
+
+Exposure
+--------
+Source exposure:
+  mean:             0.484
+  exact overlap:    25.00%
+  >= 0.85:         25.00%
+
+Pair exposure:
+  exact overlap:    25.00%
+  PairLeak@0.85:   25.00%
+
+Generalization gap
+------------------
+GenGap-BLEU:  53.09
+GenGap-chrF:  42.53
 ```
 
 Write machine-readable artifacts:
@@ -76,14 +194,24 @@ tame-mt score \
   --tm-out tm.out
 ```
 
-For large corpora, build the training index once and reuse it:
+The JSON report is for dashboards and reproducible experiment records. The
+segment JSONL file is for per-example analysis and cached scoring.
+
+## Large Corpora
+
+Nearest-neighbor retrieval over the training corpus is the expensive part.
+For large corpora, build a reusable training index once:
 
 ```bash
 tame-mt index build \
   --train-src train.src \
   --train-tgt train.tgt \
   --out train.tameidx
+```
 
+Then score or audit without passing the training files again:
+
+```bash
 tame-mt score \
   --index train.tameidx \
   --test-src test.src \
@@ -92,92 +220,88 @@ tame-mt score \
   --json-out system_a.tame.json
 ```
 
-The `.tameidx` bundle stores compressed native source/target indexes plus the
-raw training text needed for TM outputs and optional segment reports. Treat it
-like the original training corpus for privacy and access control. Bundle
-loading rejects unexpected ZIP members, duplicate names, unsafe declared sizes,
-excessive compression ratios, default load-memory budget violations, and
-unsupported native-index schema versions before deserializing native bytes.
-Native bytes are then invariant-checked before the index can answer queries.
+Inspect an index bundle without loading the full native indexes:
 
-If the train/test/reference setup is fixed and only hypotheses change, cache
-the train-aware diagnostics once and reuse them:
+```bash
+tame-mt index inspect train.tameidx
+```
+
+Important: `.tameidx` bundles contain enough training text to reproduce
+translation-memory outputs and neighbor diagnostics. Treat them like the
+original training corpus.
+
+## Many Systems
+
+When the training corpus, test source, and references are fixed, cache the
+train-aware diagnostics once:
 
 ```bash
 tame-mt audit \
-  --train-src train.src \
-  --train-tgt train.tgt \
+  --index train.tameidx \
   --test-src test.src \
   --ref test.ref \
   --segment-out segments.jsonl \
   --json-out audit.json
+```
 
+Then score one hypothesis without another training-corpus pass:
+
+```bash
 tame-mt score-cached \
   --segment-in segments.jsonl \
   --ref test.ref \
   --hyp system_a.out \
   --num-train 125000 \
   --json-out system_a.tame.json
+```
 
+Or score many systems in one batch:
+
+```bash
 tame-mt score-cached-batch \
   --segment-in segments.jsonl \
   --ref test.ref \
-  --system system_a=system_a.out \
-  --system system_b=system_b.out \
+  --system baseline=baseline.out \
+  --system model_a=model_a.out \
+  --system model_b=model_b.out \
   --num-train 125000 \
   --json-out-dir tame_reports
 ```
 
-`score-cached` does not rebuild the training index. That makes repeated scoring
-of new hypotheses close to ordinary BLEU/chrF scoring cost after the first
-audit. When evaluating many systems, `score-cached-batch` reads and validates
-the cached segment diagnostics once and computes the TM baseline once for the
-whole batch. New segment JSONL outputs are accompanied by a
-`segments.jsonl.meta.json` sidecar, and cached CLI commands validate it when
-present so changed normalization, retrieval, TM-zero, count, or bin settings do
-not silently produce a mixed-configuration report. Cached JSON reports also
-preserve the backend that produced the original segment artifact under
-`backend.artifact_backend`, so downstream dashboards can tell whether cached
-diagnostics came from `native_exact`, `native_fast`, or another retrieval mode.
+This is the closest TAME-MT path to ordinary BLEU/chrF runtime. The expensive
+exposure pass has already happened.
 
-Python services and notebooks can go one step further with
-`TameScorer.prepare_from_artifacts()`: validate the cached diagnostics once,
-keep SacreBLEU reference caches and TM baseline scores alive, then call
-`cached.score(...)` for each later hypothesis.
+## How To Read The Results
 
-Try the bundled toy example:
+| Pattern | Interpretation |
+| --- | --- |
+| High BLEU, high TM-BLEU, high PairLeak, low Far-BLEU | Raw corpus score may overstate broad generalization. Report this as high-exposure or narrow-domain performance. |
+| Moderate BLEU, low TM-BLEU, high delta over TM, good Far-BLEU | Stronger evidence that the system is doing more than nearest-neighbor reuse. |
+| Low BLEU, low TM-BLEU, low Far-BLEU | The test set is not easy for the TM baseline, and the system is also weak. |
+| High BLEU, low TM-BLEU, high Far-BLEU, low PairLeak | Stronger evidence of generalization under this test distribution. |
+| High exposure and no far-bin data | Valid in-domain result, but weak evidence for broad out-of-domain generalization. |
 
-```bash
-tame-mt score \
-  --train-src examples/toy/train.src \
-  --train-tgt examples/toy/train.tgt \
-  --test-src examples/toy/test.src \
-  --ref examples/toy/test.ref \
-  --hyp examples/toy/hyp.out
-```
+Use these diagnostics as context, not as automatic pass/fail rules. A
+high-exposure benchmark can still be useful if the claim is in-domain
+performance. It is a problem when high-exposure scores are presented as broad
+generalization evidence.
 
-## The Core Idea
+## How It Works
 
 TAME-MT builds a simple translation-memory baseline from the training corpus:
 
-1. For each test source sentence, find the most similar training source
-   sentence.
-2. Reuse that training sentence's paired target translation.
-3. Score those reused translations with BLEU and chrF.
+1. Normalize all strings for exposure scoring.
+2. Represent each string as a set of character n-grams.
+3. For each test source, find the most similar training source.
+4. Reuse that training source's paired target translation as the TM hypothesis.
+5. Score the system output and the TM hypotheses with BLEU and chrF.
+6. Compute exposure summaries and source-distance bins.
 
-If this simple baseline already scores well, the test set is highly
-training-solvable under surface nearest-neighbor reuse. That does not mean the
-system is bad. It means raw corpus scores should be interpreted as
-high-exposure or narrow-domain performance unless far-bin results support a
-broader claim.
+The default similarity is tokenizer-free character n-gram Jaccard similarity.
+That keeps the method deterministic and usable for languages without reliable
+tokenizers, segmenters, pretrained encoders, or external downloads.
 
-## How Similarity Works
-
-TAME-MT uses tokenizer-free character n-gram Jaccard similarity by default. This
-keeps the method deterministic and usable for low-resource languages without
-pretrained models, language-specific tokenizers, or downloads.
-
-First, text is normalized for exposure calculations:
+By default TAME-MT normalizes only:
 
 ```python
 text = unicodedata.normalize("NFKC", text)
@@ -185,256 +309,183 @@ text = text.strip()
 text = re.sub(r"\s+", " ", text)
 ```
 
-By default TAME-MT does not lowercase, strip diacritics, strip punctuation, or
-normalize digits.
+It does not lowercase, strip diacritics, strip punctuation, or normalize digits
+unless you ask for those options.
 
-For a normalized string \(s\), define \(G(s)\) as the set of character n-grams
-for orders 3, 4, and 5:
+## The Math
 
-```math
+This section uses simple GitHub-supported Markdown math and avoids custom
+operator macros.
+
+Assume a training corpus with `m` aligned pairs:
+
+```text
+(u_1, v_1), (u_2, v_2), ..., (u_m, v_m)
+```
+
+and a test set with `n` examples:
+
+```text
+(x_1, r_1), (x_2, r_2), ..., (x_n, r_n)
+```
+
+Here:
+
+- `u_j` is a normalized training source;
+- `v_j` is the paired normalized training target;
+- `x_i` is a normalized test source;
+- `r_i` is a normalized reference translation;
+- `h_i` is a system hypothesis;
+- `h_i^TM` is the translation-memory hypothesis.
+
+### Character N-Gram Sets
+
+For a normalized string `s`, let `G_k(s)` be the set of character n-grams of
+length `k`.
+
+$$
 G(s) = G_3(s) \cup G_4(s) \cup G_5(s)
-```
+$$
 
-The similarity between two strings \(a\) and \(b\) is Jaccard similarity:
+### String Similarity
 
-```math
-s(a,b) =
+Similarity is Jaccard similarity over the character n-gram sets:
+
+$$
+\mathrm{sim}(a,b) =
 \frac{|G(a) \cap G(b)|}{|G(a) \cup G(b)|}
-```
+$$
 
-If both strings are empty, similarity is defined as 1.0. If only one is empty,
-similarity is 0.0.
+If both strings are empty, similarity is defined as `1.0`. If only one string
+is empty, similarity is `0.0`.
 
-## Exposure Metrics
+### Source Exposure
 
-Let \(u_j\) be the normalized source side of training pair \(j\), and let
-\(v_j\) be its normalized target side. For each test source \(x_i\), TAME-MT
-finds the closest training source:
+For each test source, source exposure is the similarity to the nearest training
+source:
 
-```math
+$$
 E_i^{src} =
-\max_j s(x_i, u_j)
-```
+\max_{1 \le j \le m} \mathrm{sim}(x_i,u_j)
+$$
 
-The nearest-neighbor index is:
+The nearest training source index is:
 
-```math
+$$
 n_i^{src} =
-\min \{j : s(x_i, u_j) = E_i^{src}\}
-```
+\min \{j : \mathrm{sim}(x_i,u_j) = E_i^{src}\}
+$$
 
 Ties are broken by choosing the lowest training index.
 
-For a reference translation \(r_i\), target exposure is:
+### Target Exposure
 
-```math
+For each reference translation, target exposure is the similarity to the
+nearest training target:
+
+$$
 E_i^{tgt} =
-\max_j s(r_i, v_j)
-```
+\max_{1 \le j \le m} \mathrm{sim}(r_i,v_j)
+$$
+
+### Pair Exposure
 
 Pair exposure asks a stricter question: is there one training pair whose source
 and target sides are both close to the test source/reference pair?
 
-For test pair \((x_i, r_i)\) and training pair \((u_j, v_j)\):
+For test pair `i` and training pair `j`:
 
-```math
-p(i,j) =
-\min(
-  s(x_i, u_j),
-  s(r_i, v_j)
-)
-```
+$$
+P_{ij} =
+\min(\mathrm{sim}(x_i,u_j), \mathrm{sim}(r_i,v_j))
+$$
 
-Then:
+The pair exposure for test example `i` is:
 
-```math
+$$
 E_i^{pair} =
-\max_j p(i,j)
-```
+\max_{1 \le j \le m} P_{ij}
+$$
 
-`PairLeak@0.85` is the fraction of test examples where \(E_i^{pair} \ge 0.85\).
+For threshold `t`, pair leak is:
 
-In v0.1, pair exposure reranks the union of source and target top-k candidates
-instead of scoring every training pair. Exact pair overlap is still computed
-exactly.
+$$
+\mathrm{PairLeak}_{t} =
+\frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[E_i^{pair} \ge t]
+$$
 
-## Translation-Memory Baseline
+For example, `PairLeak@0.85 = 0.20` means 20% of test examples have a
+source/reference pair that is very close to one training pair.
 
-The translation-memory hypothesis for test source \(x_i\) is selected using
-only the source side:
+### Translation-Memory Baseline
 
-```math
-j^\*(i) = n_i^{src}
-```
+The TM hypothesis for test source `x_i` is selected using only the source side:
 
-```math
-h_i^{TM} =
-v_{j^\*(i)}
-```
+$$
+h_i^{TM} = v_{n_i^{src}}
+$$
 
-If no candidate shares character n-grams with the test source, the default
-policy is:
+If no useful candidate shares character n-grams with the test source, the
+default TM hypothesis is an empty string.
 
-```math
-h_i^{TM} = ""
-```
+TAME-MT never uses the reference translation to choose the TM hypothesis.
+References are used only for scoring and diagnostics.
 
-The baseline scores are ordinary corpus metrics:
+### Delta Over TM
 
-```math
-B_{TM} =
-BLEU(h^{TM}, r)
-```
+The system and TM baseline are scored with the same corpus metric:
 
-```math
-\Delta B_{TM} =
-B_{sys} - B_{TM}
-```
+$$
+B_{sys} = \mathrm{BLEU}(h,r)
+$$
 
-The same definitions apply to chrF.
+$$
+B_{TM} = \mathrm{BLEU}(h^{TM},r)
+$$
 
-Important: TAME-MT never uses the reference translation to choose the TM
-hypothesis. References are only used for scoring and diagnostics.
+The BLEU improvement over the training-memory baseline is:
 
-## Distance-Stratified Quality
+$$
+\Delta B = B_{sys} - B_{TM}
+$$
+
+The same definition is used for chrF.
+
+### Distance Bins
 
 TAME-MT bins test examples by source exposure:
 
 | Bin | Definition |
 | --- | --- |
-| `source_exact` | normalized test source appears exactly in normalized `train.src` |
-| `near` | not exact and `SourceExposure >= 0.70` |
-| `medium` | `0.30 <= SourceExposure < 0.70` |
-| `far` | `SourceExposure < 0.30` |
+| `source_exact` | Normalized test source appears exactly in normalized `train.src`. |
+| `near` | Not exact, and `SourceExposure >= 0.70`. |
+| `medium` | `0.30 <= SourceExposure < 0.70`. |
+| `far` | `SourceExposure < 0.30`. |
 
-Each bin reports count, percentage, mean source exposure, system BLEU/chrF,
-TM-BLEU/TM-chrF, and delta over TM.
+Generalization gap is near-bin quality minus far-bin quality:
 
-Generalization gap is:
-
-```math
-g_{BLEU} =
-B_{near} - B_{far}
-```
+$$
+Gap_{BLEU} = B_{near} - B_{far}
+$$
 
 A large positive gap means the system performs much better on train-similar
 examples than on train-distant examples. A small gap is not automatically good:
-a weak system can perform poorly in every bin.
+a weak system can score poorly in every bin.
 
-## Worked Example
+## Command Line Reference
 
-Suppose a training corpus contains:
+Main commands:
 
-```text
-train.src: god created the heaven and the earth
-train.tgt: dios creó el cielo y la tierra
-```
-
-And the test set contains the exact same source/reference pair:
-
-```text
-test.src:  god created the heaven and the earth
-test.ref:  dios creó el cielo y la tierra
-```
-
-TAME-MT will report:
-
-```text
-SourceExposure = 1.0
-source_exact = true
-PairExposure = 1.0
-pair_exact = true
-tm_hyp = "dios creó el cielo y la tierra"
-```
-
-That segment contributes to `source_exact`, not `near`. If many test examples
-look like this, raw BLEU may be measuring training-set reuse as much as system
-generalization.
-
-Now suppose another test source is similar but not exact:
-
-```text
-test.src: and the earth was without form and void
-```
-
-If its closest training source is:
-
-```text
-train.src: and the earth was without form
-```
-
-the example may fall in the `near` bin. The TM baseline will reuse the paired
-training translation. If that baseline gets high BLEU, the test item is partly
-solvable by nearest-neighbor reuse.
-
-## Reading Common Patterns
-
-| Pattern | Plain-language interpretation |
+| Command | Use |
 | --- | --- |
-| High BLEU, high TM-BLEU, high PairLeak, low Far-BLEU | Raw score may overstate broad generalization. Treat as high-exposure or narrow-domain performance. |
-| Moderate BLEU, low TM-BLEU, high delta over TM, good Far-BLEU | Stronger evidence that the system is doing more than nearest-neighbor reuse. |
-| Low BLEU, low TM-BLEU, low Far-BLEU | The test set is not TM-solvable, and the system also performs poorly. |
-| High BLEU, low TM-BLEU, high Far-BLEU, low PairLeak | Stronger evidence of real generalization under this test distribution. |
-| High exposure and no far-bin data | Valid in-domain result, weak evidence for broad out-of-domain generalization. |
-
-## CLI Reference
-
-Full scoring:
-
-```bash
-tame-mt score \
-  --train-src train.src \
-  --train-tgt train.tgt \
-  --test-src test.src \
-  --ref test.ref \
-  --hyp system.out
-```
-
-Audit a benchmark before evaluating systems:
-
-```bash
-tame-mt audit \
-  --train-src train.src \
-  --train-tgt train.tgt \
-  --test-src test.src \
-  --ref test.ref
-```
-
-Write translation-memory hypotheses:
-
-```bash
-tame-mt tm-baseline \
-  --train-src train.src \
-  --train-tgt train.tgt \
-  --test-src test.src \
-  --out tm.out \
-  --metadata-out tm_metadata.jsonl
-```
-
-Score a system from cached segment diagnostics:
-
-```bash
-tame-mt score-cached \
-  --segment-in segments.jsonl \
-  --ref test.ref \
-  --hyp system.out \
-  --num-train 125000
-```
-
-Build a reusable training index and use it without passing train files again:
-
-```bash
-tame-mt index build \
-  --train-src train.src \
-  --train-tgt train.tgt \
-  --out train.tameidx
-
-tame-mt score \
-  --index train.tameidx \
-  --test-src test.src \
-  --ref test.ref \
-  --hyp system.out
-```
+| `tame-mt doctor` | Show package, Python, dependency, and native backend status. |
+| `tame-mt score` | Run full train-aware scoring for one hypothesis. |
+| `tame-mt audit` | Compute exposure diagnostics without a system hypothesis. |
+| `tame-mt tm-baseline` | Write nearest-neighbor TM hypotheses. |
+| `tame-mt index build` | Build a reusable `.tameidx` training index. |
+| `tame-mt index inspect` | Inspect a `.tameidx` bundle manifest. |
+| `tame-mt score-cached` | Score one hypothesis from cached segment diagnostics. |
+| `tame-mt score-cached-batch` | Score many hypotheses from one cached segment file. |
 
 Common options:
 
@@ -446,13 +497,6 @@ Common options:
 --leak-thresholds 0.70,0.85,0.95
 --pair-k 50
 --index-mode auto
---auto-exact-cutoff 5000
---candidate-gram-limit 8
---posting-limit 500
---max-candidates 3000
---rerank-limit 1000
---min-bin-size-warning 30
---tm-zero-policy empty
 --lowercase
 --strip-diacritics
 --normalize-punctuation
@@ -462,15 +506,8 @@ Common options:
 --verbose
 ```
 
-Numeric options must be finite decimal values. Exposure thresholds are
-fractions in the closed interval \([0, 1]\), so values such as `1.2`, `nan`,
-`inf`, and empty comma-list items such as `0.70,,0.85` are rejected.
-
-Long-running commands support `--verbose`, which writes stage timings to
-stderr without changing human reports or JSON outputs.
-
-Segment reports do not include raw text by default. Use these only when it is
-safe to write the data:
+Raw text is excluded from segment reports by default. These flags write raw
+text and should be used only when the data can safely be stored:
 
 ```bash
 --include-source-text
@@ -481,12 +518,14 @@ safe to write the data:
 
 `--include-neighbor-text` may write raw training text.
 
-Plain UTF-8 text files and gzip-compressed files ending in `.gz` are supported
-for corpus inputs and text/JSONL/JSON outputs. This lets large benchmarks keep
-`train.src.gz`, `segments.jsonl.gz`, or `system.tame.json.gz` compressed without
-changing the command shape.
+Plain UTF-8 files and `.gz` files are supported for corpus inputs and for
+text, JSONL, and JSON outputs.
+
+For exhaustive CLI details, see [docs/cli.md](docs/cli.md).
 
 ## Python API
+
+Score files:
 
 ```python
 from tame_mt import ScoreConfig, TameScorer
@@ -507,9 +546,13 @@ print(report.delta_scores["bleu"])
 print(report.signature)
 ```
 
-In-memory corpora:
+Score in-memory corpora:
 
 ```python
+from tame_mt import TameScorer
+
+scorer = TameScorer()
+
 report = scorer.score_corpus(
     train_src=train_src_lines,
     train_tgt=train_tgt_lines,
@@ -519,7 +562,7 @@ report = scorer.score_corpus(
 )
 ```
 
-Need segment diagnostics too:
+Get segment diagnostics and TM outputs:
 
 ```python
 result = scorer.evaluate_corpus(
@@ -532,22 +575,49 @@ result = scorer.evaluate_corpus(
 
 report = result.report
 segments = result.exposures
-tm_output = result.tm_hyp
+tm_hypotheses = result.tm_hyp
 ```
 
-Reuse a saved training index from Python:
+Reuse a saved training index:
 
 ```python
 from tame_mt import load_index_bundle, save_index_bundle
 
 save_index_bundle("train.tameidx", train_src_lines, train_tgt_lines, scorer.config)
+
 bundle = load_index_bundle("train.tameidx", scorer.config)
-result = scorer.evaluate_index_bundle(bundle, test_src_lines, [ref_lines], hyp_lines)
+result = scorer.evaluate_index_bundle(
+    bundle=bundle,
+    test_src=test_src_lines,
+    refs=[ref_lines],
+    hyp=hyp_lines,
+)
 ```
 
-## JSON Output
+Prepare cached diagnostics once and score many systems:
 
-`--json-out` writes a stable top-level structure:
+```python
+cached = scorer.prepare_from_artifacts(
+    exposures=segments,
+    tm_results=result.tm_results,
+    refs=[ref_lines],
+    num_train=len(train_src_lines),
+)
+
+reports = cached.score_many(
+    {
+        "baseline": baseline_lines,
+        "model_a": model_a_lines,
+        "model_b": model_b_lines,
+    }
+)
+```
+
+For deeper API documentation, see [docs/api.md](docs/api.md).
+
+## Outputs And Reproducibility
+
+`--json-out` writes a stable report structure:
 
 ```json
 {
@@ -583,157 +653,195 @@ result = scorer.evaluate_index_bundle(bundle, test_src_lines, [ref_lines], hyp_l
 }
 ```
 
-JSON uses fractions such as `0.184`; the human report renders percentages such
-as `18.40%`.
+Every report includes a deterministic signature that records:
 
-## Reproducibility
+- TAME-MT version;
+- normalization settings;
+- similarity function;
+- retrieval backend and index mode;
+- TM baseline policy;
+- bin and leak thresholds;
+- pair reranking top-k;
+- BLEU/chrF settings;
+- metric-affecting dependency versions.
 
-Every report includes a deterministic signature, for example:
+Example:
 
 ```text
 tame-mt|v:0.1.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|idx:auto|backend:native_fast|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
 ```
 
-The signature records the TAME-MT version, normalization, similarity function,
-requested index mode, resolved backend, TM zero policy, bin thresholds, pair
-reranking top-k, selected metrics, SacreBLEU settings, and dependency versions
-that can affect metric scores. JSON reports also include these dependency
-versions under `config.dependencies`.
+For the JSON schema, see [docs/json_schema.md](docs/json_schema.md).
 
-## Performance Modes
+## Package Architecture
 
-Nearest-neighbor search over a training corpus is the expensive part of
-TAME-MT. BLEU only compares hypotheses to references; TAME-MT also needs to
-ask, for every test source, "what training source is most similar?"
+TAME-MT is split into small, testable modules:
 
-TAME-MT has native Rust retrieval backends plus pure-Python fallbacks:
+```text
+src/tame_mt/
+  cli.py          command-line interface
+  api.py          public Python scoring API
+  config.py       typed configuration and validation
+  schema.py       report and segment dataclasses
+  normalize.py    deterministic text normalization
+  ngrams.py       character n-gram extraction
+  similarity.py   Jaccard similarity logic
+  index.py        inverted-index retrieval abstractions
+  native.py       native backend selection/status
+  exact.py        exact overlap and exact-match helpers
+  exposure.py     source, target, and pair exposure assembly
+  tm.py           source-nearest-neighbor TM baseline
+  bins.py         source-distance bins and gap metrics
+  scoring.py      BLEU/chrF corpus and bin scoring
+  metrics/        SacreBLEU integration
+  artifacts.py    cached segment JSONL validation
+  persistence.py  .tameidx bundle save/load/inspection
+  report.py       text, JSON, and JSONL report rendering
+  io.py           UTF-8 and gzip input/output helpers
+```
+
+The Rust/PyO3 native extension lives in the package's Cargo crate and provides
+the high-throughput nearest-neighbor backend. The Python package keeps pure
+Python fallback modes so the metric remains usable even when the native
+extension is unavailable.
+
+Supporting directories:
+
+```text
+tests/        Python unit and CLI tests
+benchmarks/   synthetic performance and recall checks
+examples/     toy data and public-corpus demo scripts/results
+docs/         detailed CLI, API, interpretation, release, and backend docs
+.github/      CI, wheel, release, and Dependabot workflows
+```
+
+## Performance
+
+TAME-MT does more work than BLEU because it compares test examples to the
+training corpus. The package is designed so that cost is paid once whenever
+possible.
+
+Retrieval modes:
 
 | Mode | Behavior | Use |
 | --- | --- | --- |
 | `native_exact` | Rust exact character n-gram Jaccard retrieval over shared-gram candidates. | Small and medium corpora when exact nearest-neighbor exposure is required. |
-| `native_fast` | Rust rare-gram candidate generation plus exact Jaccard reranking of a bounded shortlist. | Large corpora and interactive audits. |
-| `python_exact` | Pure-Python exact fallback. | Debugging and source installs without the native extension. |
+| `native_fast` | Rust rare-gram candidate generation plus exact reranking of a bounded shortlist. | Large corpora and interactive audits. |
+| `python_exact` | Pure-Python exact fallback. | Debugging and source installs without native wheels. |
 | `python_fast` | Pure-Python bounded fast fallback. | Large-corpus fallback when native wheels are unavailable. |
-| `auto` | Uses native exact/fast when the extension is installed; otherwise uses Python exact/fast. | Default. |
+| `auto` | Chooses native exact/fast when available, otherwise Python exact/fast. | Default. |
 
-Fast mode is approximate for nearest-neighbor retrieval. Exact normalized source,
-target, and pair overlap checks remain exact, and shortlisted candidates are
-reranked with the exact Jaccard formula. For paper-critical numbers, report the
-signature and consider rerunning exact mode on smaller filtered subsets or
-high-risk bins.
+Recommended production workflow:
 
-Check the installed backend with:
+1. Build `train.tameidx` once for a fixed training corpus.
+2. Run `audit --index train.tameidx --segment-out segments.jsonl` once for a
+   fixed test/reference setup.
+3. Run `score-cached-batch` for all systems.
 
-```bash
-tame-mt doctor
-```
+Local benchmark notes for public corpora and synthetic corpora are in
+[docs/performance.md](docs/performance.md) and
+[examples/public_corpora_demo/](examples/public_corpora_demo/).
 
-On the local development machine, the OPUS-100 `de-en` public-corpus audit at
-50,000 training pairs and 2,000 test pairs completed in about 6 seconds with
-`native_fast`; `score-cached` on the saved segment diagnostics took under 2
-seconds for an additional hypothesis. On the 100,000 train / 2,000 test
-OPUS-100 `de-en` slice, a fresh `native_fast` audit took about 10.0 seconds, the
-one-time `.tameidx` build took about 9.6 seconds, and a later audit from the
-saved index took about 2.3 seconds with identical exposure outputs.
-
-On a synthetic benchmark on the same machine, a 100,000 train / 2,000 test
-`native_fast` audit takes about 2.5 seconds fresh, about 0.9 seconds from a
-saved `.tameidx`, and about 0.4 seconds for cached scoring of another
-hypothesis end to end. A prepared cached scorer takes about 0.26 seconds to
-build, then about 0.16 seconds per later hypothesis; five prepared cached
-systems score at about 0.17 seconds per system. The compressed 100,000-pair
-source+target `.tameidx` is about 67 MB on that benchmark. At 100,000 train /
-10,000 test, the same path takes about 4.3 seconds fresh, about 2.8 seconds
-from a saved `.tameidx`, about 2.2 seconds for one end-to-end cached score, and
-about 0.8 seconds for each later prepared cached score. The cached stage is the
-closest analogue to ordinary BLEU/chrF scoring because it no longer touches the
-training corpus. Ordered cached artifacts take a fast validation path, and
-whole-corpus SacreBLEU statistics are reused without copying before bin
-aggregation. Fresh and indexed audits use slotted per-segment objects to reduce
-memory pressure, native maps use randomized hashing to reduce collision-DoS
-exposure, evaluation retrieval runs in configurable chunks, and exposure
-summaries collect each side once, sort once, and use binary search for
-threshold counts instead of rescanning the corpus for every threshold.
-Source-only audits and `tm-baseline` queries also use top-1 source retrieval
-unless pair exposure is being computed.
-
-For production evaluation, use a staged workflow:
-
-1. Run `tame-mt index build --out train.tameidx` once for a fixed training
-   corpus.
-2. Run `tame-mt audit --index train.tameidx --segment-out segments.jsonl` once
-   for a fixed train/test/reference setup.
-3. Run `tame-mt score-cached-batch` for all system outputs from that setup.
-
-The index stage avoids rebuilding source/target postings. The audit stage is
-train-aware and does nearest-neighbor retrieval. The cached-score stage reuses
-exposure and TM hypotheses, so adding another system output does not require
-another pass over the training corpus. Batch cached scoring also avoids
-re-reading segment diagnostics and recomputing TM metric baselines for every
-system.
-
-## Privacy
+## Privacy And Security
 
 TAME-MT runs locally. It does not download models, call remote services, or send
 text anywhere.
 
-Training data can still be sensitive. By default, TAME-MT does not print
-nearest-neighbor training text. Segment reports contain indices and scores
-unless raw text fields are explicitly requested.
+Data can still leak through artifacts you choose to write:
 
-Index bundles created by `tame-mt index build` store raw training source/target
-lines and normalized exact-match and pair keys so later runs can produce
-identical TM outputs and optional neighbor-text diagnostics. Do not publish
-`.tameidx` files unless the underlying training corpus can also be published.
-Treat `.tameidx` files from unknown sources as untrusted inputs. The loader
-enforces size, compression-ratio, and default load-memory limits, validates the
-archive shape, and validates native index invariants before queries can run, but
-the safest workflow is still to rebuild bundles from trusted
-`train.src`/`train.tgt` files. Use `--max-index-load-bytes` only for trusted
-large bundles on machines with enough memory.
+- `--include-neighbor-text` can write raw training text;
+- `.tameidx` bundles contain training text needed for reproducible TM outputs;
+- segment JSONL files may contain raw test/reference/hypothesis text if raw
+  text flags are enabled.
+
+Treat `.tameidx`, segment JSONL, and metadata files from unknown sources as
+untrusted. The loader rejects malformed or suspicious index bundles before
+native deserialization, including unexpected ZIP members, duplicate names,
+unsafe declared sizes, excessive compression ratios, load-memory budget
+violations, unsupported schema versions, and invalid native-index invariants.
+
+For more detail, see [SECURITY.md](SECURITY.md).
 
 ## Limitations
 
 TAME-MT does not prove that a neural model memorized a sentence. It does not
-measure semantic adequacy. It does not make a high-exposure benchmark invalid.
-It does not replace human evaluation.
+measure semantic adequacy. It does not decide whether a benchmark is valid. It
+does not replace human evaluation.
 
 The default similarity is surface-based. It can miss semantic paraphrases and
-can overemphasize orthographic similarity. Pair exposure in v0.1 uses top-k
-candidate reranking for speed; exact pair overlap is exact.
+can overemphasize orthographic similarity.
 
-Fast retrieval mode is approximate. It is designed to make large-corpus audits
-usable while retaining exact scoring within the selected candidate set.
+Fast retrieval mode is approximate for nearest-neighbor retrieval, although
+shortlisted candidates are reranked with the exact Jaccard formula and exact
+normalized source, target, and pair overlaps remain exact.
 
-## Development
+Pair exposure in v0.1 reranks a candidate set for speed instead of scoring
+every possible training pair. Exact pair overlap is still exact.
+
+## Development And Contributing
+
+Install development dependencies:
 
 ```bash
 pip install -e '.[dev]'
+```
+
+Run the core checks:
+
+```bash
 pytest
+ruff format --check .
 ruff check .
 mypy src/tame_mt
 cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 python benchmarks/validate_fast_recall.py --require-native
 python -m build
 python -m twine check dist/*
 ```
 
-For release work, run `scripts/acceptance.sh` locally and see
-[`docs/release.md`](docs/release.md). Tagged releases are built by GitHub
-Actions, checked with `twine`, audited, attested, accompanied by an SBOM
-artifact, and published through PyPI trusted publishing only after a manual
-tagged workflow dispatch with `publish=true`.
-CI also runs a larger staged benchmark outside the Python-version matrix; the
-local acceptance script keeps the heavier 100k train / 2k test performance gate
-for release candidates.
+Run the full release-candidate acceptance suite:
+
+```bash
+scripts/acceptance.sh
+```
+
+Contribution rules:
+
+- keep runtime dependencies small;
+- do not add model downloads or remote calls;
+- do not change metric definitions without updating signatures, tests, and the
+  changelog;
+- do not print raw training-neighbor text by default;
+- add tests for user-visible CLI, JSON, artifact, or metric changes.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Release Process
+
+Releases are built by GitHub Actions and published through PyPI Trusted
+Publishing.
+
+Before a release:
+
+1. Update versions in `pyproject.toml`, `Cargo.toml`, and
+   `src/tame_mt/version.py`.
+2. Update [CHANGELOG.md](CHANGELOG.md).
+3. Run `scripts/acceptance.sh`.
+4. Push a `v*` tag.
+5. Let the tag-triggered release workflow build wheels, validate distributions,
+   and generate the SBOM artifact.
+6. Manually dispatch the release workflow from the tag with `publish=true`.
+7. Approve the protected `pypi` environment deployment.
+
+See [docs/release.md](docs/release.md).
 
 ## Citation
 
 ```bibtex
 @software{tame_mt_2026,
-  title = {TAME-MT: Training-Aware Machine Translation Evaluation for Machine Translation},
+  title = {TAME-MT: Training-Aware Machine Translation Evaluation},
   year = {2026},
   version = {0.1.0},
   url = {https://github.com/hunterschep/TAME-MT}
@@ -742,4 +850,4 @@ for release candidates.
 
 ## License
 
-MIT.
+TAME-MT is released under the MIT License. See [LICENSE](LICENSE).
