@@ -29,6 +29,9 @@
   local smoke timing while preserving fast indexed reuse.
 - Added explicit `.tameidx` bundle and native index schema versioning so
   incompatible persisted indexes fail with clear rebuild guidance.
+- Hardened `.tameidx` loading with strict manifest types, duplicate-member
+  rejection, and manifest-vs-ZIP member size checks before native index
+  deserialization.
 - Optimized native index reuse by avoiding duplicate Python exact maps and by
   persisting normalized exact-pair keys for faster repeated audits.
 - Hardened cached segment artifact scoring with strict index validation,

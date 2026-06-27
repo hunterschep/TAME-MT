@@ -28,6 +28,7 @@ EXACT_PAIR_KEYS_NAME = "exact_pairs.keys"
 ZIP_COMPRESSION = zipfile.ZIP_DEFLATED
 ZIP_COMPRESSION_NAME = "deflated"
 ZIP_COMPRESSLEVEL = 1
+MAX_MANIFEST_BYTES = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -128,12 +129,10 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
         with zipfile.ZipFile(Path(path), mode="r") as archive:
             manifest = _read_manifest(archive)
             _validate_manifest(manifest, config)
+            _validate_archive_members(archive, manifest)
+            has_target = _manifest_bool(manifest, "has_target")
             train_src = _read_lines_member(archive, TRAIN_SRC_NAME)
-            train_tgt = (
-                _read_lines_member(archive, TRAIN_TGT_NAME)
-                if bool(manifest.get("has_target"))
-                else None
-            )
+            train_tgt = _read_lines_member(archive, TRAIN_TGT_NAME) if has_target else None
             if _manifest_int(manifest, "num_train") != len(train_src):
                 raise ConfigurationError(
                     "index bundle manifest does not match stored train.src line count"
@@ -156,7 +155,7 @@ def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
 
             target_index = None
             exact_pair_keys = None
-            if train_tgt is not None:
+            if has_target:
                 target_backend = _backend_manifest(manifest, "target_backend")
                 target_index = NgramInvertedIndex.from_native(
                     native_index=_load_native_bytes(
@@ -245,9 +244,11 @@ def _backend_to_dict(index: NgramInvertedIndex | None) -> dict[str, Any]:
 
 def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
     try:
-        payload = archive.read(MANIFEST_NAME).decode("utf-8")
-    except KeyError as exc:
-        raise ConfigurationError("index bundle is missing manifest.json") from exc
+        payload = _read_member_bytes(
+            archive,
+            MANIFEST_NAME,
+            max_size=MAX_MANIFEST_BYTES,
+        ).decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ConfigurationError("index bundle manifest is not valid UTF-8") from exc
     try:
@@ -262,17 +263,19 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
 def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
     if manifest.get("format") != INDEX_FORMAT:
         raise ConfigurationError("not a TAME-MT index bundle")
-    if manifest.get("format_version") != FORMAT_VERSION:
+    format_version = _manifest_int(manifest, "format_version")
+    if format_version != FORMAT_VERSION:
         raise ConfigurationError(
             "unsupported index bundle format version: "
-            f"{manifest.get('format_version')}; rebuild the .tameidx file with the current "
+            f"{format_version}; rebuild the .tameidx file with the current "
             "TAME-MT version"
         )
     storage = _storage_manifest(manifest)
-    if storage.get("native_index_schema_version") != NATIVE_INDEX_SCHEMA_VERSION:
+    native_schema_version = _storage_int(storage, "native_index_schema_version")
+    if native_schema_version != NATIVE_INDEX_SCHEMA_VERSION:
         raise ConfigurationError(
             "unsupported native index schema version: "
-            f"{storage.get('native_index_schema_version')}; rebuild the .tameidx file with the "
+            f"{native_schema_version}; rebuild the .tameidx file with the "
             "current TAME-MT version"
         )
 
@@ -292,7 +295,7 @@ def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
 
     source_backend = _backend_manifest(manifest, "source_backend")
     _validate_requested_backend(source_backend, config)
-    if bool(manifest.get("has_target")):
+    if _manifest_bool(manifest, "has_target"):
         target_backend = _backend_manifest(manifest, "target_backend")
         _validate_requested_backend(target_backend, config)
 
@@ -302,16 +305,51 @@ def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
     _validate_build_settings(saved_index, config, source_backend)
 
 
+def _validate_archive_members(archive: zipfile.ZipFile, manifest: dict[str, Any]) -> None:
+    storage = _storage_manifest(manifest)
+    has_target = _manifest_bool(manifest, "has_target")
+
+    _archive_member_info(archive, TRAIN_SRC_NAME)
+    _validate_member_size(
+        archive,
+        SOURCE_INDEX_NAME,
+        _positive_storage_int(storage, "source_index_bytes"),
+    )
+
+    target_index_bytes = _storage_int(storage, "target_index_bytes")
+    exact_pair_keys_bytes = _storage_int(storage, "exact_pair_keys_bytes")
+    if has_target:
+        _archive_member_info(archive, TRAIN_TGT_NAME)
+        _validate_member_size(
+            archive,
+            TARGET_INDEX_NAME,
+            _positive_storage_int(storage, "target_index_bytes"),
+        )
+        _validate_member_size(
+            archive,
+            EXACT_PAIR_KEYS_NAME,
+            _positive_storage_int(storage, "exact_pair_keys_bytes"),
+        )
+    elif target_index_bytes != 0 or exact_pair_keys_bytes != 0:
+        raise ConfigurationError(
+            "index bundle manifest has target storage bytes but has_target is false"
+        )
+
+
 def _manifest_int(manifest: dict[str, Any], key: str) -> int:
     value = manifest.get(key)
     if value is None:
         raise ConfigurationError(f"index bundle manifest field {key} must be an integer")
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigurationError(f"index bundle manifest field {key} must be an integer")
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ConfigurationError(f"index bundle manifest field {key} must be an integer") from exc
+    return cast(int, value)
+
+
+def _manifest_bool(manifest: dict[str, Any], key: str) -> bool:
+    value = manifest.get(key)
+    if not isinstance(value, bool):
+        raise ConfigurationError(f"index bundle manifest field {key} must be a boolean")
+    return value
 
 
 def _validate_requested_backend(backend: dict[str, Any], config: ScoreConfig) -> None:
@@ -358,25 +396,77 @@ def _storage_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], storage)
 
 
+def _storage_int(storage: dict[str, Any], key: str) -> int:
+    value = storage.get(key)
+    if value is None:
+        raise ConfigurationError(f"index bundle storage field {key} must be an integer")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(f"index bundle storage field {key} must be an integer")
+    if value < 0:
+        raise ConfigurationError(f"index bundle storage field {key} must be non-negative")
+    return cast(int, value)
+
+
+def _positive_storage_int(storage: dict[str, Any], key: str) -> int:
+    value = _storage_int(storage, key)
+    if value <= 0:
+        raise ConfigurationError(f"index bundle storage field {key} must be positive")
+    return value
+
+
+def _archive_member_info(archive: zipfile.ZipFile, name: str) -> zipfile.ZipInfo:
+    matches = [item for item in archive.infolist() if item.filename == name]
+    if not matches:
+        raise ConfigurationError(f"index bundle is missing {name}")
+    if len(matches) > 1:
+        raise ConfigurationError(f"index bundle has duplicate member {name}")
+    return matches[0]
+
+
+def _has_archive_member(archive: zipfile.ZipFile, name: str) -> bool:
+    return any(item.filename == name for item in archive.infolist())
+
+
+def _validate_member_size(
+    archive: zipfile.ZipFile,
+    name: str,
+    expected_size: int,
+) -> None:
+    actual_size = _archive_member_info(archive, name).file_size
+    if actual_size != expected_size:
+        raise ConfigurationError(
+            f"index bundle member {name} size {actual_size} does not match "
+            f"manifest value {expected_size}"
+        )
+
+
+def _read_member_bytes(
+    archive: zipfile.ZipFile,
+    name: str,
+    *,
+    max_size: int | None = None,
+) -> bytes:
+    member = _archive_member_info(archive, name)
+    if max_size is not None and member.file_size > max_size:
+        raise ConfigurationError(
+            f"index bundle member {name} is too large: {member.file_size} > {max_size}"
+        )
+    return archive.read(member)
+
+
 def _read_lines_member(archive: zipfile.ZipFile, name: str) -> list[str]:
-    try:
-        return _decode_lines(archive.read(name), name)
-    except KeyError as exc:
-        raise ConfigurationError(f"index bundle is missing {name}") from exc
+    return _decode_lines(_read_member_bytes(archive, name), name)
 
 
 def _read_bytes_member(archive: zipfile.ZipFile, name: str) -> bytes:
-    try:
-        return archive.read(name)
-    except KeyError as exc:
-        raise ConfigurationError(f"index bundle is missing {name}") from exc
+    return _read_member_bytes(archive, name)
 
 
 def _read_exact_pair_keys_member(archive: zipfile.ZipFile) -> set[str] | None:
-    try:
-        return _decode_exact_pair_keys(archive.read(EXACT_PAIR_KEYS_NAME))
-    except KeyError:
+    if not _has_archive_member(archive, EXACT_PAIR_KEYS_NAME):
         return None
+    try:
+        return _decode_exact_pair_keys(_read_member_bytes(archive, EXACT_PAIR_KEYS_NAME))
     except UnicodeDecodeError as exc:
         raise ConfigurationError("index bundle exact-pair key member is not valid UTF-8") from exc
 

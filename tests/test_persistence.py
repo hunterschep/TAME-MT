@@ -93,6 +93,17 @@ def test_inspect_index_bundle_reports_invalid_utf8_manifest(tmp_path: Path) -> N
         inspect_index_bundle(path)
 
 
+def test_inspect_index_bundle_rejects_duplicate_manifest_member(tmp_path: Path) -> None:
+    path = tmp_path / "bad.tameidx"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", "{}\n")
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr("manifest.json", "{}\n")
+
+    with pytest.raises(ConfigurationError, match="duplicate member manifest.json"):
+        inspect_index_bundle(path)
+
+
 def test_load_index_bundle_reports_invalid_num_train_manifest(tmp_path: Path) -> None:
     pytest.importorskip("tame_mt._native")
     path = tmp_path / "train.tameidx"
@@ -110,6 +121,52 @@ def test_load_index_bundle_reports_invalid_num_train_manifest(tmp_path: Path) ->
                 target.writestr(item, source.read(item.filename))
 
     with pytest.raises(ConfigurationError, match="num_train must be an integer"):
+        load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_float_num_train_manifest(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    _copy_bundle_with_manifest_override(path, bad_path, {"num_train": 1.5})
+
+    with pytest.raises(ConfigurationError, match="num_train must be an integer"):
+        load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_non_boolean_has_target(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    _copy_bundle_with_manifest_override(path, bad_path, {"has_target": "false"})
+
+    with pytest.raises(ConfigurationError, match="has_target must be a boolean"):
+        load_index_bundle(bad_path, config)
+
+
+def test_load_index_bundle_rejects_manifest_member_size_mismatch(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    bad_path = tmp_path / "bad.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+    manifest = inspect_index_bundle(path)
+    source_bytes = manifest["storage"]["source_index_bytes"]
+    assert isinstance(source_bytes, int)
+
+    _copy_bundle_with_manifest_override(
+        path,
+        bad_path,
+        {"storage": {"source_index_bytes": source_bytes + 1}},
+    )
+
+    with pytest.raises(ConfigurationError, match="source.index.bin size"):
         load_index_bundle(bad_path, config)
 
 

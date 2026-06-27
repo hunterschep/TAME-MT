@@ -91,6 +91,11 @@ index schema version. If either version is unsupported, TAME-MT rejects the
 bundle before deserializing native bytes. Rebuild the index with the current
 `tame-mt index build` command after native-index upgrades.
 
+Bundle loading also validates strict manifest field types, duplicate ZIP member
+names, and declared native-member byte sizes before native deserialization. This
+keeps corrupt or hand-edited `.tameidx` files from silently loading under the
+wrong settings.
+
 Bundles are low-compression zip containers by default. Level-1 deflate keeps
 load time low while avoiding very large cache artifacts on public-corpus-scale
 training sets. Because bundles contain raw training text and normalized
