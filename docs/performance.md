@@ -125,7 +125,9 @@ the compact n-gram table, per-segment result objects use slotted dataclasses to
 reduce memory pressure, and exposure summaries collect source/target/pair
 scores in one pass before sorting each side once. Threshold counts then use
 binary search over the sorted scores instead of rescanning every segment for
-each threshold.
+each threshold. Fresh native audits also release Python-side normalized
+training-line copies after exact pair keys are prepared; the Rust indexes keep
+the state needed for exact checks and nearest-neighbor queries.
 
 When pair exposure is not requested, for example `tm-baseline` or source-only
 audits without references, TAME-MT queries only the nearest source neighbor

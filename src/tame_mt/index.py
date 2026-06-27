@@ -430,6 +430,16 @@ class NgramInvertedIndex:
             return bool(self._native_index.contains_exact(normalized_text))
         return normalized_text in self.exact_map
 
+    def release_python_normalized_lines(self) -> bool:
+        """Drop Python normalized text copies when the native index no longer needs them."""
+
+        if self._native_index is None:
+            return False
+        if not self.normalized_lines:
+            return False
+        self.normalized_lines = []
+        return True
+
     def native_bytes(self) -> bytes:
         if self._native_index is None:
             raise BackendError("native index bytes are only available for the native backend")

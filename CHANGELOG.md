@@ -48,6 +48,8 @@
 - Optimized exposure-summary generation by collecting side statistics in one
   pass, sorting each score side once, and using binary search for threshold
   counts.
+- Reduced fresh native-audit memory pressure by releasing Python-side
+  normalized training-line copies after exact pair keys have been prepared.
 - Hardened cached segment artifact scoring with strict index validation,
   canonical ordering, and safer JSON type parsing.
 - Rejected cached segment artifacts whose stored exposure-bin labels do not

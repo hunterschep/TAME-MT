@@ -56,6 +56,9 @@ def compute_exposure_result(
         exact_pair_keys = _build_exact_pair_keys(
             train_src, train_tgt, source_index, target_index, config
         )
+    source_index.release_python_normalized_lines()
+    if target_index is not None:
+        target_index.release_python_normalized_lines()
 
     needs_pair_candidates = target_index is not None and refs is not None
     retrieval_k = max(1, config.index.topk if needs_pair_candidates else 1)

@@ -74,6 +74,33 @@ def test_native_exact_matches_python_exact_when_available() -> None:
     )
 
 
+def test_native_index_can_release_python_normalized_lines_when_available() -> None:
+    pytest.importorskip("tame_mt._native")
+    index = NgramInvertedIndex.build(
+        ["abcdef", "uvwxyz", "abcxyz"],
+        index_config=IndexConfig(mode="native_exact"),
+    )
+    expected = index.query_topk("abcdeg", 3)
+
+    assert index.normalized_lines
+    assert index.release_python_normalized_lines() is True
+    assert index.normalized_lines == []
+    assert index.release_python_normalized_lines() is False
+    assert index.query_topk("abcdeg", 3) == expected
+    assert index.contains_exact_normalized("abcdef") is True
+    assert index.score_candidate("abcdef", 0) == 1.0
+
+
+def test_python_index_keeps_normalized_lines_on_release_request() -> None:
+    index = NgramInvertedIndex.build(
+        ["abcdef", "uvwxyz"],
+        index_config=IndexConfig(mode="python_exact"),
+    )
+
+    assert index.release_python_normalized_lines() is False
+    assert index.normalized_lines == ["abcdef", "uvwxyz"]
+
+
 def test_score_candidates_matches_single_candidate_scoring() -> None:
     lines = ["abcdef", "uvwxyz", "abcxyz"]
     index = NgramInvertedIndex.build(lines, index_config=IndexConfig(mode="python_exact"))

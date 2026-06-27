@@ -59,6 +59,12 @@ Corpus-level batch queries and batched pair reranking release the Python GIL and
 use Rayon for parallel execution inside Rust. Python still owns file IO,
 SacreBLEU scoring, JSON serialization, and report formatting.
 
+During fresh native audits, Python keeps normalized training strings only long
+enough to build exact source/target pair keys. It then releases those Python
+copies; the Rust indexes retain the compact grams, postings, and exact maps
+needed for retrieval. Loaded `.tameidx` bundles follow the same low-memory shape
+and do not materialize Python normalized training-line copies.
+
 Pair exposure uses native pair reranking when both source and target indexes are
 native. Python builds deterministic candidate ID lists from source and target
 top-k results, then Rust scores each source/reference query against the shared
