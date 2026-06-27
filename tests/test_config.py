@@ -76,6 +76,10 @@ def test_config_rejects_invalid_index_and_tm_options() -> None:
         IndexConfig(topk=True)
     with pytest.raises(ConfigurationError, match="topk"):
         IndexConfig(topk=1.5)  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="batch_size"):
+        IndexConfig(batch_size=0)
+    with pytest.raises(ConfigurationError, match="batch_size"):
+        IndexConfig(batch_size=True)
     with pytest.raises(ConfigurationError, match="auto_exact_cutoff"):
         IndexConfig(auto_exact_cutoff=False)
     with pytest.raises(ConfigurationError, match="candidate_gram_limit"):

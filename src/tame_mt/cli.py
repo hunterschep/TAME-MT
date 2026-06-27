@@ -28,7 +28,12 @@ from tame_mt.exceptions import TameMTError
 from tame_mt.io import ensure_parent_dir, open_text, read_lines, write_lines
 from tame_mt.json_utils import strict_json_dumps
 from tame_mt.native import native_status
-from tame_mt.persistence import inspect_index_bundle, load_index_bundle, save_index_bundle
+from tame_mt.persistence import (
+    MAX_BUNDLE_LOAD_BYTES,
+    inspect_index_bundle,
+    load_index_bundle,
+    save_index_bundle,
+)
 from tame_mt.report import (
     render_text_report,
     segment_metadata_path,
@@ -85,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_args(score_parser)
     _add_segment_args(score_parser, include_hyp=True)
     score_parser.add_argument("--index", help="load a reusable training index bundle")
+    _add_index_load_args(score_parser)
     score_parser.add_argument("--train-src", help="training source text file")
     score_parser.add_argument("--train-tgt", help="training target text file")
     score_parser.add_argument("--test-src", required=True, help="test source text file")
@@ -111,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_config_args(audit_parser)
     _add_segment_args(audit_parser, include_hyp=False)
     audit_parser.add_argument("--index", help="load a reusable training index bundle")
+    _add_index_load_args(audit_parser)
     audit_parser.add_argument("--train-src", help="training source text file")
     audit_parser.add_argument("--train-tgt", help="training target text file")
     audit_parser.add_argument("--test-src", required=True, help="test source text file")
@@ -267,7 +274,11 @@ def run_score(args: argparse.Namespace) -> int:
     scorer = TameScorer(config)
     if args.index:
         with _timed_step(args, "load index bundle"):
-            bundle = load_index_bundle(args.index, config)
+            bundle = load_index_bundle(
+                args.index,
+                config,
+                max_load_bytes=args.max_index_load_bytes,
+            )
         if bundle.train_tgt is None:
             raise TameMTError("indexed train.tgt is required for score mode")
         train_src = bundle.train_src
@@ -318,7 +329,11 @@ def run_audit(args: argparse.Namespace) -> int:
     scorer = TameScorer(config)
     if args.index:
         with _timed_step(args, "load index bundle"):
-            bundle = load_index_bundle(args.index, config)
+            bundle = load_index_bundle(
+                args.index,
+                config,
+                max_load_bytes=args.max_index_load_bytes,
+            )
         train_src = bundle.train_src
         train_tgt = bundle.train_tgt
         with _timed_step(args, "evaluate indexed corpus"):
@@ -511,6 +526,12 @@ def _add_config_args(parser: argparse.ArgumentParser) -> None:
         "--pair-k", type=int, default=50, help="top-k source/target candidates for pair reranking"
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8_192,
+        help="evaluation segments processed per native retrieval batch",
+    )
+    parser.add_argument(
         "--index-mode",
         choices=[
             "auto",
@@ -605,6 +626,18 @@ def _add_segment_args(parser: argparse.ArgumentParser, *, include_hyp: bool) -> 
         )
 
 
+def _add_index_load_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--max-index-load-bytes",
+        type=int,
+        default=MAX_BUNDLE_LOAD_BYTES,
+        help=(
+            "maximum uncompressed bytes to load from --index; raise only for trusted bundles "
+            "on machines with enough memory"
+        ),
+    )
+
+
 def _config_from_args(args: argparse.Namespace) -> ScoreConfig:
     ngram_orders = parse_int_tuple(args.ngram_orders)
     leak_thresholds = parse_float_tuple(args.leak_thresholds)
@@ -620,6 +653,7 @@ def _config_from_args(args: argparse.Namespace) -> ScoreConfig:
         index=IndexConfig(
             mode=args.index_mode,
             topk=args.pair_k,
+            batch_size=args.batch_size,
             auto_exact_cutoff=args.auto_exact_cutoff,
             candidate_gram_limit=args.candidate_gram_limit,
             posting_limit=args.posting_limit,

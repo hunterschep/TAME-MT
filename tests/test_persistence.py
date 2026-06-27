@@ -10,6 +10,7 @@ from tame_mt.config import IndexConfig, ScoreConfig
 from tame_mt.exceptions import ConfigurationError
 from tame_mt.persistence import (
     FORMAT_VERSION,
+    MAX_BUNDLE_LOAD_BYTES,
     NATIVE_INDEX_SCHEMA_VERSION,
     ZIP_COMPRESSION,
     ZIP_COMPRESSION_NAME,
@@ -239,6 +240,27 @@ def test_load_index_bundle_rejects_excessive_zip_compression_ratio(
 
     with pytest.raises(ConfigurationError, match="compression ratio is too high"):
         load_index_bundle(path, config)
+
+
+def test_load_index_bundle_rejects_load_budget_excess(tmp_path: Path) -> None:
+    pytest.importorskip("tame_mt._native")
+    path = tmp_path / "train.tameidx"
+    config = ScoreConfig(index=IndexConfig(mode="native_exact"))
+    save_index_bundle(path, ["abcdef"], ["alpha"], config)
+
+    with pytest.raises(ConfigurationError, match="load footprint exceeds maximum"):
+        load_index_bundle(path, config, max_load_bytes=1)
+
+    loaded = load_index_bundle(path, config, max_load_bytes=MAX_BUNDLE_LOAD_BYTES)
+
+    assert loaded.train_src == ["abcdef"]
+
+
+def test_load_index_bundle_rejects_invalid_load_budget(tmp_path: Path) -> None:
+    path = tmp_path / "empty.tameidx"
+
+    with pytest.raises(ConfigurationError, match="max_load_bytes"):
+        load_index_bundle(path, ScoreConfig(), max_load_bytes=0)
 
 
 def test_save_index_bundle_is_atomic_when_write_fails(

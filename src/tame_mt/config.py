@@ -49,6 +49,7 @@ class SimilarityConfig:
 class IndexConfig:
     mode: str = "auto"
     topk: int = 50
+    batch_size: int = 8_192
     auto_exact_cutoff: int = 5_000
     candidate_gram_limit: int = 8
     posting_limit: int = 500
@@ -73,6 +74,7 @@ class IndexConfig:
                 "python_exact, python_fast, native_exact, native_fast"
             )
         _require_positive_int("topk", self.topk)
+        _require_positive_int("batch_size", self.batch_size)
         _require_non_negative_int("auto_exact_cutoff", self.auto_exact_cutoff)
         _require_positive_int("candidate_gram_limit", self.candidate_gram_limit)
         _require_positive_int("posting_limit", self.posting_limit)

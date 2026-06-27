@@ -35,6 +35,7 @@ MAX_TRAIN_TEXT_MEMBER_BYTES = 4 * 1024 * 1024 * 1024
 MAX_NATIVE_INDEX_BYTES = 8 * 1024 * 1024 * 1024
 MAX_EXACT_PAIR_KEYS_BYTES = 8 * 1024 * 1024 * 1024
 MAX_TOTAL_UNCOMPRESSED_BYTES = 24 * 1024 * 1024 * 1024
+MAX_BUNDLE_LOAD_BYTES = 4 * 1024 * 1024 * 1024
 MAX_ZIP_COMPRESSION_RATIO = 500.0
 
 
@@ -141,14 +142,20 @@ def save_index_bundle(
     )
 
 
-def load_index_bundle(path: str | Path, config: ScoreConfig) -> IndexBundle:
+def load_index_bundle(
+    path: str | Path,
+    config: ScoreConfig,
+    *,
+    max_load_bytes: int | None = MAX_BUNDLE_LOAD_BYTES,
+) -> IndexBundle:
     """Load and validate a native training index bundle for the supplied config."""
 
+    _validate_max_load_bytes(max_load_bytes)
     try:
         with zipfile.ZipFile(Path(path), mode="r") as archive:
             manifest = _read_manifest(archive)
             _validate_manifest(manifest, config)
-            _validate_archive_members(archive, manifest)
+            _validate_archive_members(archive, manifest, max_load_bytes=max_load_bytes)
             has_target = _manifest_bool(manifest, "has_target")
             train_src = _read_lines_member(archive, TRAIN_SRC_NAME)
             train_tgt = _read_lines_member(archive, TRAIN_TGT_NAME) if has_target else None
@@ -324,7 +331,12 @@ def _validate_manifest(manifest: dict[str, Any], config: ScoreConfig) -> None:
     _validate_build_settings(saved_index, config, source_backend)
 
 
-def _validate_archive_members(archive: zipfile.ZipFile, manifest: dict[str, Any]) -> None:
+def _validate_archive_members(
+    archive: zipfile.ZipFile,
+    manifest: dict[str, Any],
+    *,
+    max_load_bytes: int | None,
+) -> None:
     storage = _storage_manifest(manifest)
     has_target = _manifest_bool(manifest, "has_target")
 
@@ -356,6 +368,36 @@ def _validate_archive_members(archive: zipfile.ZipFile, manifest: dict[str, Any]
     elif target_index_bytes != 0 or exact_pair_keys_bytes != 0:
         raise ConfigurationError(
             "index bundle manifest has target storage bytes but has_target is false"
+        )
+    _validate_load_budget(archive, has_target=has_target, max_load_bytes=max_load_bytes)
+
+
+def _validate_max_load_bytes(max_load_bytes: int | None) -> None:
+    if max_load_bytes is None:
+        return
+    if isinstance(max_load_bytes, bool) or not isinstance(max_load_bytes, int):
+        raise ConfigurationError("max_load_bytes must be an integer or None")
+    if max_load_bytes <= 0:
+        raise ConfigurationError("max_load_bytes must be positive")
+
+
+def _validate_load_budget(
+    archive: zipfile.ZipFile,
+    *,
+    has_target: bool,
+    max_load_bytes: int | None,
+) -> None:
+    if max_load_bytes is None:
+        return
+    member_names = [TRAIN_SRC_NAME, SOURCE_INDEX_NAME]
+    if has_target:
+        member_names.extend([TRAIN_TGT_NAME, TARGET_INDEX_NAME, EXACT_PAIR_KEYS_NAME])
+    load_bytes = sum(_archive_member_info(archive, name).file_size for name in member_names)
+    if load_bytes > max_load_bytes:
+        raise ConfigurationError(
+            "index bundle load footprint exceeds maximum: "
+            f"{load_bytes} > {max_load_bytes}. "
+            "Raise max_load_bytes only for trusted bundles on machines with enough memory."
         )
 
 

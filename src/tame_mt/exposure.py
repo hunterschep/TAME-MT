@@ -60,111 +60,123 @@ def compute_exposure_result(
     if target_index is not None:
         target_index.release_python_normalized_lines()
 
+    exposures: list[SegmentExposure] = []
     needs_pair_candidates = target_index is not None and refs is not None
     retrieval_k = max(1, config.index.topk if needs_pair_candidates else 1)
-    normalized_test_src = [source_index.normalized(source) for source in test_src]
-    source_tops_by_segment = source_index.batch_query_topk_normalized(
-        normalized_test_src, retrieval_k
+    batch_size = config.index.batch_size
+    supports_native_pair = (
+        target_index is not None and source_index.supports_native_pair_candidates(target_index)
     )
-    normalized_refs_by_ref = (
-        [[target_index.normalized(text) for text in ref] for ref in refs]
-        if target_index is not None and refs is not None
-        else []
-    )
-    target_tops_by_ref = (
-        [
-            target_index.batch_query_topk_normalized(normalized_ref, retrieval_k)
-            for normalized_ref in normalized_refs_by_ref
-        ]
-        if target_index is not None
-        else []
-    )
-    pair_neighbors_by_segment = (
-        _batch_pair_neighbors(
-            normalized_test_src=normalized_test_src,
-            normalized_refs_by_ref=normalized_refs_by_ref,
-            source_tops_by_segment=source_tops_by_segment,
-            target_tops_by_ref=target_tops_by_ref,
-            source_index=source_index,
-            target_index=target_index,
+    for batch_start in range(0, len(test_src), batch_size):
+        batch_end = min(batch_start + batch_size, len(test_src))
+        batch_sources = test_src[batch_start:batch_end]
+        normalized_test_src = [source_index.normalized(source) for source in batch_sources]
+        source_tops_by_segment = source_index.batch_query_topk_normalized(
+            normalized_test_src,
+            retrieval_k,
         )
-        if target_index is not None
-        and refs is not None
-        and source_index.supports_native_pair_candidates(target_index)
-        else None
-    )
-
-    exposures: list[SegmentExposure] = []
-    for idx, source_text in enumerate(test_src):
-        source_top = source_tops_by_segment[idx]
-        src_nn = source_top[0] if source_top else NeighborResult(index=None, score=0.0, exact=False)
-        source_exact = src_nn.exact
-
-        ref_texts = [ref[idx] for ref in refs] if refs is not None else []
-        target_tops = [tops_by_ref[idx] for tops_by_ref in target_tops_by_ref]
-        target_nn, target_ref_index = (
-            _best_target_neighbor(target_tops) if target_index else (None, None)
+        normalized_refs_by_ref = (
+            [[target_index.normalized(text) for text in ref[batch_start:batch_end]] for ref in refs]
+            if target_index is not None and refs is not None
+            else []
         )
-        target_exact = _has_exact_neighbor(target_tops) if target_index is not None else None
-        pair_exact = (
-            any(
-                exact_pair_key(normalized_test_src[idx], normalized_refs_by_ref[ref_idx][idx])
-                in exact_pair_keys
-                for ref_idx in range(len(ref_texts))
-            )
-            if exact_pair_keys is not None and refs is not None
-            else None
+        target_tops_by_ref = (
+            [
+                target_index.batch_query_topk_normalized(normalized_ref, retrieval_k)
+                for normalized_ref in normalized_refs_by_ref
+            ]
+            if target_index is not None
+            else []
         )
-        pair_nn = (
-            pair_neighbors_by_segment[idx]
-            if pair_neighbors_by_segment is not None
-            else _compute_pair_neighbor(
-                source_text=source_text,
-                ref_texts=ref_texts,
-                source_top=source_top,
-                target_tops=target_tops,
+        pair_neighbors_by_segment = (
+            _batch_pair_neighbors(
+                normalized_test_src=normalized_test_src,
+                normalized_refs_by_ref=normalized_refs_by_ref,
+                source_tops_by_segment=source_tops_by_segment,
+                target_tops_by_ref=target_tops_by_ref,
                 source_index=source_index,
                 target_index=target_index,
             )
-            if target_index is not None and ref_texts
+            if target_index is not None and refs is not None and supports_native_pair
             else None
         )
-        pair_ref_index: int | None = None
-        if (
-            target_index is not None
-            and pair_nn is not None
-            and pair_nn.index is not None
-            and normalized_refs_by_ref
-        ):
-            pair_ref_index = (
-                0
-                if len(normalized_refs_by_ref) == 1
-                else _best_pair_ref_index(
+
+        for offset, source_text in enumerate(batch_sources):
+            idx = batch_start + offset
+            source_top = source_tops_by_segment[offset]
+            src_nn = (
+                source_top[0] if source_top else NeighborResult(index=None, score=0.0, exact=False)
+            )
+            source_exact = src_nn.exact
+
+            ref_texts = [ref[idx] for ref in refs] if refs is not None else []
+            target_tops = [tops_by_ref[offset] for tops_by_ref in target_tops_by_ref]
+            target_nn, target_ref_index = (
+                _best_target_neighbor(target_tops) if target_index else (None, None)
+            )
+            target_exact = _has_exact_neighbor(target_tops) if target_index is not None else None
+            pair_exact = (
+                any(
+                    exact_pair_key(
+                        normalized_test_src[offset],
+                        normalized_refs_by_ref[ref_idx][offset],
+                    )
+                    in exact_pair_keys
+                    for ref_idx in range(len(ref_texts))
+                )
+                if exact_pair_keys is not None and refs is not None
+                else None
+            )
+            pair_nn = (
+                pair_neighbors_by_segment[offset]
+                if pair_neighbors_by_segment is not None
+                else _compute_pair_neighbor(
+                    source_text=source_text,
+                    ref_texts=ref_texts,
+                    source_top=source_top,
+                    target_tops=target_tops,
+                    source_index=source_index,
                     target_index=target_index,
-                    ref_texts=[ref[idx] for ref in normalized_refs_by_ref],
-                    candidate_index=pair_nn.index,
-                    pair_score=pair_nn.score,
+                )
+                if target_index is not None and ref_texts
+                else None
+            )
+            pair_ref_index: int | None = None
+            if (
+                target_index is not None
+                and pair_nn is not None
+                and pair_nn.index is not None
+                and normalized_refs_by_ref
+            ):
+                pair_ref_index = (
+                    0
+                    if len(normalized_refs_by_ref) == 1
+                    else _best_pair_ref_index(
+                        target_index=target_index,
+                        ref_texts=[ref[offset] for ref in normalized_refs_by_ref],
+                        candidate_index=pair_nn.index,
+                        pair_score=pair_nn.score,
+                    )
+                )
+
+            bin_name = assign_bin_values(source_exact, src_nn.score, config.bins)
+            exposures.append(
+                SegmentExposure(
+                    index=idx,
+                    source_exposure=src_nn.score,
+                    source_nn_index=src_nn.index,
+                    source_exact=source_exact,
+                    target_exposure=target_nn.score if target_nn else None,
+                    target_nn_index=target_nn.index if target_nn else None,
+                    target_exact=target_exact,
+                    pair_exposure=pair_nn.score if pair_nn else None,
+                    pair_nn_index=pair_nn.index if pair_nn else None,
+                    pair_exact=pair_exact,
+                    bin=bin_name,
+                    target_ref_index=target_ref_index,
+                    pair_ref_index=pair_ref_index,
                 )
             )
-
-        bin_name = assign_bin_values(source_exact, src_nn.score, config.bins)
-        exposures.append(
-            SegmentExposure(
-                index=idx,
-                source_exposure=src_nn.score,
-                source_nn_index=src_nn.index,
-                source_exact=source_exact,
-                target_exposure=target_nn.score if target_nn else None,
-                target_nn_index=target_nn.index if target_nn else None,
-                target_exact=target_exact,
-                pair_exposure=pair_nn.score if pair_nn else None,
-                pair_nn_index=pair_nn.index if pair_nn else None,
-                pair_exact=pair_exact,
-                bin=bin_name,
-                target_ref_index=target_ref_index,
-                pair_ref_index=pair_ref_index,
-            )
-        )
     return ExposureComputation(segments=exposures, backend=source_index.backend_info)
 
 

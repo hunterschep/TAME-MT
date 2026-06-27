@@ -1,4 +1,4 @@
-from tame_mt.config import ScoreConfig
+from tame_mt.config import IndexConfig, ScoreConfig
 from tame_mt.exposure import compute_exposure, summarize_exposures
 from tame_mt.schema import SegmentExposure
 
@@ -68,6 +68,61 @@ def test_multi_ref_exposure_records_best_reference_indices() -> None:
     assert exposures[0].target_ref_index == 1
     assert exposures[0].pair_exposure == 1.0
     assert exposures[0].pair_ref_index == 1
+
+
+def test_chunked_exposure_matches_large_batch_results() -> None:
+    train_src = [
+        "shared source",
+        "near source alpha",
+        "near source beta",
+        "unrelated source",
+    ]
+    train_tgt = [
+        "matching target",
+        "alpha target",
+        "beta target",
+        "unrelated target",
+    ]
+    test_src = [
+        "shared source",
+        "near source alpah",
+        "near source bet",
+        "new source",
+        "unrelated source",
+    ]
+    refs = [
+        [
+            "unrelated target",
+            "alpha target",
+            "beta target",
+            "new target",
+            "unrelated target",
+        ],
+        [
+            "matching target",
+            "other alpha",
+            "other beta",
+            "other new",
+            "other unrelated",
+        ],
+    ]
+
+    one_at_a_time = compute_exposure(
+        train_src=train_src,
+        train_tgt=train_tgt,
+        test_src=test_src,
+        refs=refs,
+        config=ScoreConfig(index=IndexConfig(batch_size=1)),
+    )
+    large_batch = compute_exposure(
+        train_src=train_src,
+        train_tgt=train_tgt,
+        test_src=test_src,
+        refs=refs,
+        config=ScoreConfig(index=IndexConfig(batch_size=100)),
+    )
+
+    assert one_at_a_time == large_batch
 
 
 def test_exposure_summary_uses_stable_percentile_and_threshold_semantics() -> None:
