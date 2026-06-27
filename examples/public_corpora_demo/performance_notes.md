@@ -70,15 +70,15 @@ pairs and 2,000 test pairs:
 | OPUS-100 `de-en`, 100k train / 2k test, fresh audit | `native_fast` | ~10.0s |
 | OPUS-100 `de-en`, 100k train / 2k test, one-time index build | `native_fast` | ~9.6s |
 | OPUS-100 `de-en`, 100k train / 2k test, audit from `.tameidx` | `native_fast`, reused index | ~2.3s |
-| Synthetic 100k train / 2k test | `native_fast` | ~5.1s |
+| Synthetic 100k train / 2k test, fresh audit | `native_fast` | ~2.5s |
 
 The index-build step is the reusable training-corpus cost. The audit step is
 the train/test/reference diagnostic cost. The cached-score step is the
 repeated-system cost and is much closer to ordinary BLEU/chrF evaluation.
 
-The local OPUS-100 100k source+target `.tameidx` bundle was about 383 MB. That
-is intentionally an uncompressed speed-oriented artifact, not a publication
-format.
+`.tameidx` bundles use low-compression ZIP storage by default. Bundle size
+depends on corpus size, script, target availability, and exact-pair overlap
+storage, so report the actual file size alongside timing results.
 
 These timings are a smoke benchmark, not a formal performance claim. They are
 included to make the intended large-corpus workflow concrete.
