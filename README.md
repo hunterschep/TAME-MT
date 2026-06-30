@@ -648,8 +648,8 @@ For deeper API documentation, see [docs/api.md](docs/api.md).
 ```json
 {
   "schema_version": "1.0",
-  "tame_version": "0.2.0",
-  "signature": "tame-mt|v:0.2.0|...",
+  "tame_version": "0.2.1",
+  "signature": "tame-mt|v:0.2.1|...",
   "data": {
     "num_train": 125000,
     "num_test": 1000,
@@ -701,7 +701,7 @@ Every report includes a deterministic signature that records:
 Example:
 
 ```text
-tame-mt|v:0.2.0|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|retrieval:exact|approx:0|idx:auto|backend:native_exact|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|pair_exact:0|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
+tame-mt|v:0.2.1|norm:nfkc_ws_case|sim:char_jaccard_3-5_set|retrieval:exact|approx:0|idx:auto|backend:native_exact|tm:src_nn_top1_zero_empty|bins:far0.30_near0.70_leak0.70,0.85,0.95|pair_k:50|pair_exact:0|fast:8,500,3000,1000|metrics:bleu,chrf|sacrebleu:bleu_tok_13a_lc_0_chrf_wo_2|deps:sacrebleu_2.6.0
 ```
 
 For the JSON schema, see [docs/json_schema.md](docs/json_schema.md).
@@ -956,7 +956,7 @@ See [docs/release.md](docs/release.md).
 @software{tame_mt_2026,
   title = {TAME-MT: Training-Aware Machine Translation Evaluation},
   year = {2026},
-  version = {0.2.0},
+  version = {0.2.1},
   url = {https://github.com/hunterschep/TAME-MT}
 }
 ```

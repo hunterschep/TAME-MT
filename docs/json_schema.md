@@ -19,8 +19,8 @@ still pre-1.0.
 ```json
 {
   "schema_version": "1.0",
-  "tame_version": "0.2.0",
-  "signature": "tame-mt|v:0.2.0|...",
+  "tame_version": "0.2.1",
+  "signature": "tame-mt|v:0.2.1|...",
   "data": {},
   "config": {},
   "retrieval": {},

@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "tame-mt-native"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "pyo3",

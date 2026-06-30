@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - 2026-06-30
 
 - Made the PyPI publish job retry-safe by checking existing PyPI filenames and
   SHA-256 hashes before upload. Matching already-published artifacts are
