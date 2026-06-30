@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Made the PyPI publish job retry-safe by checking existing PyPI filenames and
+  SHA-256 hashes before upload. Matching already-published artifacts are
+  removed from the local upload set, all-present releases skip upload cleanly,
+  and same-name/different-hash artifacts fail with explicit guidance to release
+  a new version.
+
 ## 0.2.0 - 2026-06-27
 
 - Added a structured `CachedArtifact` public API and `load_cached_artifact()`

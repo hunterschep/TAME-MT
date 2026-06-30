@@ -59,6 +59,13 @@ The workflow pins third-party actions to immutable commit SHAs; update those
 pins deliberately during release-maintenance work rather than floating them on
 every run.
 
+The publish job is retry-safe. Before upload, it checks PyPI for files already
+published for the tag's version. If a local distribution has the same filename
+and SHA-256 hash as PyPI, the job removes it from the upload set. If every file
+is already present, the job exits successfully without uploading. If PyPI has
+the same filename with a different hash, the job fails because PyPI filenames
+are immutable; publish a new version instead of retrying that filename.
+
 ## Supply-Chain Checks
 
 CI runs:

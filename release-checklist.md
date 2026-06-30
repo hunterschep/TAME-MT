@@ -73,6 +73,11 @@ gh run watch --exit-status
 The publish job must use trusted publishing and provenance attestation. Do not
 use a long-lived PyPI API token for normal releases.
 
+If a publish run is retried after some or all files already reached PyPI, the
+workflow preflight must either skip matching already-published files or fail on
+same-name/different-hash files. PyPI filenames are immutable; never delete and
+reuse a filename to force a different artifact under the same version.
+
 ## 6. Post-Release Smoke
 
 After PyPI shows the new version:
